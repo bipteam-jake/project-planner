@@ -177,6 +177,24 @@ export default function ProjectDetailsPage() {
       {/* Project Inputs */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="space-y-1">
+          <div className="text-sm font-medium">Description</div>
+          <Input
+            value={project.description}
+            onChange={(e) =>
+              setProject({ ...project, description: e.target.value })
+            }
+          />
+        </div>
+
+        <div className="space-y-1">
+          <div className="text-sm font-medium">Status</div>
+          <Input
+            value={project.status}
+            onChange={(e) => setProject({ ...project, status: e.target.value })}
+          />
+        </div>
+
+        <div className="space-y-1">
           <div className="text-sm font-medium">Start month</div>
           <input
             type="month"

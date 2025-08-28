@@ -36,6 +36,8 @@ export interface MonthRow {
 export interface Project {
   id: string;
   name: string;
+  description: string;
+  status: string;
   overheadPerHour: number;   // $/hr
   targetMarginPct: number;   // 0..1
   startMonthISO: string;     // YYYY-MM
@@ -132,6 +134,8 @@ export function createProject(partial?: Partial<Project>): Project {
   const proj: Project = {
     id: uuid(),
     name: partial?.name ?? "New Project",
+    description: partial?.description ?? "",
+    status: partial?.status ?? "Active",
     overheadPerHour: partial?.overheadPerHour ?? 15,
     targetMarginPct: partial?.targetMarginPct ?? 0.35,
     startMonthISO: start,
@@ -153,7 +157,7 @@ export function createProject(partial?: Partial<Project>): Project {
 }
 
 export function upsertProject(p: Project, projects: Project[]): Project[] {
-  const stamped = { ...p, updatedAt: Date.now() };
+  const stamped: Project = { ...p, updatedAt: Date.now() };
   const idx = projects.findIndex((x) => x.id === p.id);
   if (idx === -1) return [stamped, ...projects];
   const next = [...projects];
