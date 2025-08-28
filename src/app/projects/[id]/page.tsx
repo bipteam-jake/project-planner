@@ -10,9 +10,6 @@ import {
   Project,
   RosterPerson,
   MonthRow,
-  loadProjects,
-  saveProjects,
-  loadRoster,
   upsertProject,
   labelFromISO,
   computeProjectTotals,
@@ -24,6 +21,9 @@ import {
   effectiveHourlyRate,
   TotalsResult,
 } from "@/lib/storage";
+
+import { localStorageRepo as repo } from "@/lib/repo";
+
 
 /** Helpers for month math & colors (consistent with dashboard) */
 function ymFromStartIndex(startISO: string, index: number): string {
@@ -58,14 +58,14 @@ export default function ProjectDetailsPage() {
 
   // Load once, then mark hydrated
   useEffect(() => {
-    setProjects(loadProjects());
-    setRoster(loadRoster());
+    setProjects(repo.loadProjects());
+    setRoster(repo.loadRoster());
     setHydrated(true);
   }, []);
 
   // Autosave projects (guarded)
   useEffect(() => {
-    if (hydrated) saveProjects(projects);
+    if (hydrated) repo.saveProjects(projects);
   }, [projects, hydrated]);
 
   // Derive current project

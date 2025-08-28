@@ -9,11 +9,12 @@ import {
   currency,
   computeProjectTotals,
   createProject,
-  loadProjects,
-  loadRoster,
+
   saveProjects,
   upsertProject,
 } from "@/lib/storage";
+
+import { localStorageRepo as repo } from "@/lib/repo";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -21,14 +22,14 @@ export default function ProjectsPage() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setProjects(loadProjects());
-    setRoster(loadRoster());
+    setProjects(repo.loadProjects());
+    setRoster(repo.loadRoster());
     setHydrated(true);
   }, []);
 
   // Autosave only after initial load
   useEffect(() => {
-    if (hydrated) saveProjects(projects);
+    if (hydrated) repo.saveProjects(projects);
   }, [projects, hydrated]);
 
   function addProject(): void {

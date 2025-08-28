@@ -10,10 +10,11 @@ import {
   PersonType,
   FTCompMode,
   isFullTimeLike,
-  loadRoster,
-  saveRoster,
   toNumber,
 } from "@/lib/storage";
+
+import { localStorageRepo as repo } from "@/lib/repo";
+
 
 export default function PersonnelPage() {
   const [roster, setRoster] = useState<RosterPerson[]>([]);
@@ -23,13 +24,13 @@ export default function PersonnelPage() {
 
   // Load roster on mount
   useEffect(() => {
-    setRoster(loadRoster());
+    setRoster(repo.loadRoster());
     setHydrated(true);
   }, []);
 
   // Autosave only after initial load
   useEffect(() => {
-    if (hydrated) saveRoster(roster);
+    if (hydrated) repo.saveRoster(roster);
   }, [roster, hydrated]);
 
   const filtered = useMemo(() => {

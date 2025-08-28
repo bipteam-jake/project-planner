@@ -5,14 +5,16 @@ import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
-  loadProjects,
-  loadRoster,
   currency,
   Project,
   RosterPerson,
   toNumber,
   effectiveHourlyRate,
 } from "@/lib/storage";
+
+// ⬇️ NEW: use the repo abstraction (can later swap to `apiRepo`)
+import { localStorageRepo as repo } from "@/lib/repo";
+
 import {
   BarChart,
   Bar,
@@ -26,7 +28,8 @@ import {
   CartesianGrid,
 } from "recharts";
 
-// ---------- helpers ----------
+/* ---------------- helpers shared by dashboard ---------------- */
+
 function ymFromStartIndex(startISO: string, index: number): string {
   const [y, m] = startISO.split("-").map((n) => Number(n));
   const d = new Date(y, m - 1 + index, 1);
@@ -34,10 +37,15 @@ function ymFromStartIndex(startISO: string, index: number): string {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   return `${yy}-${mm}`;
 }
+
 function labelFromYm(ym: string): string {
   const [y, m] = ym.split("-").map((n) => Number(n));
-  return new Date(y, m - 1, 1).toLocaleString(undefined, { month: "short", year: "numeric" });
+  return new Date(y, m - 1, 1).toLocaleString(undefined, {
+    month: "short",
+    year: "numeric",
+  });
 }
+
 function inYmRange(ym: string, start?: string, end?: string) {
   if (start && ym < start) return false;
   if (end && ym > end) return false;
@@ -118,10 +126,16 @@ function buildCalendarRollupFiltered(
   return Array.from(rows.values()).sort((a, b) => (a.ym < b.ym ? -1 : 1));
 }
 
-// Utilization matrix with expandable per-project breakdown
+/* --------- Utilization heatmap (expandable person → projects) --------- */
+
 type HeatMonth = { ym: string; label: string };
 type HeatCell = { ym: string; label: string; hours: number; util: number };
-type HeatProjectRow = { project: Project; cells: HeatCell[]; totalHours: number; avgUtil: number };
+type HeatProjectRow = {
+  project: Project;
+  cells: HeatCell[];
+  totalHours: number;
+  avgUtil: number;
+};
 type HeatPersonRow = {
   person: RosterPerson;
   total: { cells: HeatCell[]; totalHours: number; avgUtil: number };
@@ -146,13 +160,15 @@ function buildUtilizationMatrixWithProjects(
   const months = Array.from(monthsSet.values()).sort();
 
   // people subset
-  const people = selectedPeople && selectedPeople.size > 0
-    ? roster.filter((r) => selectedPeople.has(r.id))
-    : roster;
+  const people =
+    selectedPeople && selectedPeople.size > 0
+      ? roster.filter((r) => selectedPeople.has(r.id))
+      : roster;
 
   // person->ym total, and person->project->ym
   const byPersonTotal: Record<string, Record<string, number>> = {};
-  const byPersonProject: Record<string, Record<string, Record<string, number>>> = {};
+  const byPersonProject: Record<string, Record<string, Record<string, number>>> =
+    {};
   for (const person of people) {
     byPersonTotal[person.id] = {};
     byPersonProject[person.id] = {};
@@ -178,8 +194,10 @@ function buildUtilizationMatrixWithProjects(
 
         byPersonTotal[personId][ym] += hours;
 
-        if (!byPersonProject[personId][p.id]) byPersonProject[personId][p.id] = {};
-        if (!byPersonProject[personId][p.id][ym]) byPersonProject[personId][p.id][ym] = 0;
+        if (!byPersonProject[personId][p.id])
+          byPersonProject[personId][p.id] = {};
+        if (!byPersonProject[personId][p.id][ym])
+          byPersonProject[personId][p.id][ym] = 0;
         byPersonProject[personId][p.id][ym] += hours;
       }
     }
@@ -193,28 +211,71 @@ function buildUtilizationMatrixWithProjects(
       return { ym, label: labelFromYm(ym), hours, util: hours / base };
     });
     const totalHours = totalCells.reduce((s, c) => s + c.hours, 0);
-    const avgUtil = totalCells.length ? totalCells.reduce((s, c) => s + c.util, 0) / totalCells.length : 0;
+    const avgUtil = totalCells.length
+      ? totalCells.reduce((s, c) => s + c.util, 0) / totalCells.length
+      : 0;
 
-    // per-project rows (only include projects where person has >0 hours across window)
+    // per-project rows
     const projRows: HeatProjectRow[] = projects
-      .filter((p) => !!byPersonProject[person.id][p.id] && Object.values(byPersonProject[person.id][p.id]).some((h) => h > 0))
+      .filter(
+        (p) =>
+          !!byPersonProject[person.id][p.id] &&
+          Object.values(byPersonProject[person.id][p.id]).some((h) => h > 0)
+      )
       .map((p) => {
         const cells: HeatCell[] = months.map((ym) => {
           const hours = byPersonProject[person.id][p.id][ym] ?? 0;
           return { ym, label: labelFromYm(ym), hours, util: hours / base };
         });
         const th = cells.reduce((s, c) => s + c.hours, 0);
-        const au = cells.length ? cells.reduce((s, c) => s + c.util, 0) / cells.length : 0;
+        const au = cells.length
+          ? cells.reduce((s, c) => s + c.util, 0) / cells.length
+          : 0;
         return { project: p, cells, totalHours: th, avgUtil: au };
       });
 
     return { person, total: { cells: totalCells, totalHours, avgUtil }, byProject: projRows };
   });
 
-  return { months: months.map((ym) => ({ ym, label: labelFromYm(ym) })), rows };
+  return {
+    months: months.map((ym) => ({ ym, label: labelFromYm(ym) })),
+    rows,
+  };
 }
 
-// ---------- page ----------
+/* ------------------- heatmap cell helpers (uncapped + warning) ------------------- */
+
+function colorForUtil(util: number): string {
+  const pct = Math.min(util, 1.5); // cap color for visual only
+  if (pct >= 1.01) return "bg-red-400";
+  if (pct >= 0.75) return "bg-teal-400";
+  if (pct >= 0.5) return "bg-green-400";
+  if (pct >= 0.25) return "bg-green-200";
+  return "bg-gray-200";
+}
+
+function UtilBadge({ util }: { util: number }) {
+  const pctDisplay = (util * 100).toFixed(0); // show real % (can exceed 100)
+  const overBy = util > 1 ? ((util - 1) * 100).toFixed(0) : null;
+  const cls = `rounded-md px-2 py-2 ${colorForUtil(util)} text-black/80 inline-flex items-center gap-1 justify-center`;
+  return (
+    <div className={cls} title={overBy ? `Over by ${overBy}%` : "Within capacity"}>
+      <span>{pctDisplay}%</span>
+      {overBy && (
+        <span
+          className="text-red-700 font-semibold"
+          aria-label={`Overallocated by ${overBy}%`}
+          title={`Overallocated by ${overBy}%`}
+        >
+          ⚠
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------- page ---------------------------------- */
+
 export default function DashboardPage() {
   const [hydrated, setHydrated] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -230,12 +291,13 @@ export default function DashboardPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const ps = loadProjects();
-    const rs = loadRoster();
+    // ⬇️ repo-backed (can later swap to API by changing the import only)
+    const ps = repo.loadProjects();
+    const rs = repo.loadRoster();
     setProjects(ps);
     setRoster(rs);
     setSelectedProjects(new Set(ps.map((p) => p.id))); // default: all projects
-    setSelectedPeople(new Set(rs.map((r) => r.id)));   // default: all people
+    setSelectedPeople(new Set(rs.map((r) => r.id))); // default: all people
     setHydrated(true);
   }, []);
 
@@ -245,22 +307,33 @@ export default function DashboardPage() {
   }, [projects, selectedProjects]);
 
   // Costs rollup (filtered)
-  const rolled = useMemo(() => {
-    return buildCalendarRollupFiltered(
-      filteredProjects,
-      roster,
-      selectedPeople,
-      startYm || undefined,
-      endYm || undefined
-    );
-  }, [filteredProjects, roster, selectedPeople, startYm, endYm]);
+  const rolled = useMemo(
+    () =>
+      buildCalendarRollupFiltered(
+        filteredProjects,
+        roster,
+        selectedPeople,
+        startYm || undefined,
+        endYm || undefined
+      ),
+    [filteredProjects, roster, selectedPeople, startYm, endYm]
+  );
 
   // Summary over filtered window
   const summary = useMemo(() => {
-    let labor = 0, overhead = 0, expenses = 0, allIn = 0, revenue = 0, hours = 0;
+    let labor = 0,
+      overhead = 0,
+      expenses = 0,
+      allIn = 0,
+      revenue = 0,
+      hours = 0;
     for (const r of rolled) {
-      labor += r.labor; overhead += r.overhead; expenses += r.expenses;
-      allIn += r.allIn; revenue += r.revenue; hours += r.hours;
+      labor += r.labor;
+      overhead += r.overhead;
+      expenses += r.expenses;
+      allIn += r.allIn;
+      revenue += r.revenue;
+      hours += r.hours;
     }
     const profit = revenue - allIn;
     const margin = revenue > 0 ? profit / revenue : 0;
@@ -269,7 +342,8 @@ export default function DashboardPage() {
 
   // Cumulative series (for the line chart)
   const cumulative = useMemo(() => {
-    let cumRev = 0, cumAllIn = 0;
+    let cumRev = 0;
+    let cumAllIn = 0;
     return rolled.map((r) => {
       cumRev += r.revenue;
       cumAllIn += r.allIn;
@@ -278,21 +352,24 @@ export default function DashboardPage() {
   }, [rolled]);
 
   // Heatmap with expandable per-project rows
-  const heat = useMemo(() => {
-    return buildUtilizationMatrixWithProjects(
-      filteredProjects,
-      roster,
-      selectedPeople,
-      startYm || undefined,
-      endYm || undefined
-    );
-  }, [filteredProjects, roster, selectedPeople, startYm, endYm]);
+  const heat = useMemo(
+    () =>
+      buildUtilizationMatrixWithProjects(
+        filteredProjects,
+        roster,
+        selectedPeople,
+        startYm || undefined,
+        endYm || undefined
+      ),
+    [filteredProjects, roster, selectedPeople, startYm, endYm]
+  );
 
   // Project selection helpers
   function toggleProject(id: string, on: boolean) {
     setSelectedProjects((prev) => {
       const next = new Set(prev);
-      if (on) next.add(id); else next.delete(id);
+      if (on) next.add(id);
+      else next.delete(id);
       return next;
     });
   }
@@ -307,7 +384,8 @@ export default function DashboardPage() {
   function togglePerson(id: string, on: boolean) {
     setSelectedPeople((prev) => {
       const next = new Set(prev);
-      if (on) next.add(id); else next.delete(id);
+      if (on) next.add(id);
+      else next.delete(id);
       return next;
     });
   }
@@ -328,7 +406,8 @@ export default function DashboardPage() {
     });
   }
 
-  if (!hydrated) return <div className="text-sm text-muted-foreground">Loading…</div>;
+  if (!hydrated)
+    return <div className="text-sm text-muted-foreground">Loading…</div>;
 
   return (
     <div className="space-y-6">
@@ -339,15 +418,27 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <div className="text-sm font-medium mb-1">Start month</div>
-            <Input type="month" value={startYm} onChange={(e) => setStartYm(e.target.value)} />
+            <Input
+              type="month"
+              value={startYm}
+              onChange={(e) => setStartYm(e.target.value)}
+            />
           </div>
           <div>
             <div className="text-sm font-medium mb-1">End month</div>
-            <Input type="month" value={endYm} onChange={(e) => setEndYm(e.target.value)} />
+            <Input
+              type="month"
+              value={endYm}
+              onChange={(e) => setEndYm(e.target.value)}
+            />
           </div>
           <div className="flex items-end gap-2">
-            <Button variant="outline" onClick={selectAllProjects}>Select all projects</Button>
-            <Button variant="outline" onClick={clearProjects}>Clear</Button>
+            <Button variant="outline" onClick={selectAllProjects}>
+              Select all projects
+            </Button>
+            <Button variant="outline" onClick={clearProjects}>
+              Clear
+            </Button>
           </div>
         </div>
 
@@ -355,15 +446,25 @@ export default function DashboardPage() {
         <div className="space-y-2">
           <div className="text-sm font-medium">Projects</div>
           {projects.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No projects yet. Create one on the Projects page.</div>
+            <div className="text-sm text-muted-foreground">
+              No projects yet. Create one on the Projects page.
+            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {projects.map((p) => {
                 const checked = selectedProjects.has(p.id);
                 return (
-                  <label key={p.id}
-                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${checked ? "bg-secondary" : "bg-background"}`}>
-                    <input type="checkbox" checked={checked} onChange={(e) => toggleProject(p.id, e.target.checked)} />
+                  <label
+                    key={p.id}
+                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${
+                      checked ? "bg-secondary" : "bg-background"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => toggleProject(p.id, e.target.checked)}
+                    />
                     <span className="truncate">{p.name}</span>
                   </label>
                 );
@@ -377,20 +478,34 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium">People</div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={selectAllPeople}>Select all</Button>
-              <Button variant="outline" onClick={clearPeople}>Clear</Button>
+              <Button variant="outline" onClick={selectAllPeople}>
+                Select all
+              </Button>
+              <Button variant="outline" onClick={clearPeople}>
+                Clear
+              </Button>
             </div>
           </div>
           {roster.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No people yet. Add them on the Personnel page.</div>
+            <div className="text-sm text-muted-foreground">
+              No people yet. Add them on the Personnel page.
+            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {roster.map((r) => {
                 const checked = selectedPeople.has(r.id);
                 return (
-                  <label key={r.id}
-                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${checked ? "bg-secondary" : "bg-background"}`}>
-                    <input type="checkbox" checked={checked} onChange={(e) => togglePerson(r.id, e.target.checked)} />
+                  <label
+                    key={r.id}
+                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${
+                      checked ? "bg-secondary" : "bg-background"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => togglePerson(r.id, e.target.checked)}
+                    />
                     <span className="truncate">{r.name}</span>
                   </label>
                 );
@@ -424,11 +539,9 @@ export default function DashboardPage() {
               <YAxis />
               <Tooltip />
               <Legend />
-              {/* stacked costs */}
               <Bar dataKey="expenses" stackId="a" name="Expenses" fill="#9ca3af" />
               <Bar dataKey="labor" stackId="a" name="Labor" fill="#60a5fa" />
               <Bar dataKey="overhead" stackId="a" name="Overhead" fill="#f59e0b" />
-              {/* revenue line overlay */}
               <Line
                 type="monotone"
                 dataKey="revenue"
@@ -442,24 +555,39 @@ export default function DashboardPage() {
         </div>
       </div>
 
-
       {/* Cumulative: Revenue vs All-in */}
       <div className="rounded-xl border p-4">
-        <div className="text-sm font-semibold mb-2">Cumulative Revenue vs All-in</div>
+        <div className="text-sm font-semibold mb-2">
+          Cumulative Revenue vs All-in
+        </div>
         <div style={{ width: "100%", height: 320 }}>
           <ResponsiveContainer>
-            <LineChart data={rolled.map((r, idx) => ({
-              label: r.label,
-              cumRevenue: cumulative[idx]?.cumRevenue ?? 0,
-              cumAllIn: cumulative[idx]?.cumAllIn ?? 0,
-            }))}>
+            <LineChart
+              data={rolled.map((r, idx) => ({
+                label: r.label,
+                cumRevenue: cumulative[idx]?.cumRevenue ?? 0,
+                cumAllIn: cumulative[idx]?.cumAllIn ?? 0,
+              }))}
+            >
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="label" />
               <YAxis />
               <Tooltip />
               <Legend />
-              <Line type="monotone" dataKey="cumRevenue" name="Cum. Revenue" stroke="#10b981" dot={false} />
-              <Line type="monotone" dataKey="cumAllIn" name="Cum. All-in" stroke="#ef4444" dot={false} />
+              <Line
+                type="monotone"
+                dataKey="cumRevenue"
+                name="Cum. Revenue"
+                stroke="#10b981"
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="cumAllIn"
+                name="Cum. All-in"
+                stroke="#ef4444"
+                dot={false}
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -470,15 +598,29 @@ export default function DashboardPage() {
         <div className="text-sm font-semibold">Utilization Heatmap</div>
 
         {heat.months.length === 0 || heat.rows.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No data in the selected window.</div>
+          <div className="text-sm text-muted-foreground">
+            No data in the selected window.
+          </div>
         ) : (
           <div className="overflow-auto">
             <div className="min-w-[820px]">
               {/* header row */}
-              <div className="grid" style={{ gridTemplateColumns: `260px repeat(${heat.months.length}, 1fr)` }}>
-                <div className="p-2 text-xs text-muted-foreground">Person / Project</div>
+              <div
+                className="grid"
+                style={{
+                  gridTemplateColumns: `260px repeat(${heat.months.length}, 1fr)`,
+                }}
+              >
+                <div className="p-2 text-xs text-muted-foreground">
+                  Person / Project
+                </div>
                 {heat.months.map((m) => (
-                  <div key={m.ym} className="p-2 text-xs text-center text-muted-foreground">{m.label}</div>
+                  <div
+                    key={m.ym}
+                    className="p-2 text-xs text-center text-muted-foreground"
+                  >
+                    {m.label}
+                  </div>
                 ))}
               </div>
 
@@ -490,7 +632,9 @@ export default function DashboardPage() {
                     {/* person summary row */}
                     <div
                       className="grid items-center hover:bg-muted/40 cursor-pointer"
-                      style={{ gridTemplateColumns: `260px repeat(${total.cells.length}, 1fr)` }}
+                      style={{
+                        gridTemplateColumns: `260px repeat(${total.cells.length}, 1fr)`,
+                      }}
                       onClick={() => toggleExpand(person.id)}
                       title="Click to expand"
                     >
@@ -500,35 +644,41 @@ export default function DashboardPage() {
                         </span>
                         <span className="truncate font-medium">{person.name}</span>
                         <span className="ml-2 text-xs text-muted-foreground">
-                          Avg: {(Math.min(total.avgUtil, 1) * 100).toFixed(0)}% · Total hrs: {total.totalHours.toFixed(1)}
+                          Avg: {(Math.min(total.avgUtil, 1) * 100).toFixed(0)}% ·
+                          Total hrs: {total.totalHours.toFixed(1)}
                         </span>
                       </div>
-                        {total.cells.map((c) => (
-                          <div key={c.ym} className="p-2 text-xs text-center">
-                            <UtilBadge util={c.util} />
-                          </div>
-                        ))}
+                      {total.cells.map((c) => (
+                        <div key={c.ym} className="p-2 text-xs text-center">
+                          <UtilBadge util={c.util} />
+                        </div>
+                      ))}
                     </div>
+
                     {/* expanded per-project rows */}
                     {isOpen &&
                       byProject.map((row) => (
                         <div
                           key={row.project.id}
                           className="grid items-center"
-                          style={{ gridTemplateColumns: `260px repeat(${row.cells.length}, 1fr)` }}
+                          style={{
+                            gridTemplateColumns: `260px repeat(${row.cells.length}, 1fr)`,
+                          }}
                         >
                           <div className="p-2 text-sm pl-10 flex items-center justify-between">
-                            <span className="truncate text-muted-foreground">{row.project.name}</span>
+                            <span className="truncate text-muted-foreground">
+                              {row.project.name}
+                            </span>
                             <span className="ml-2 text-xs text-muted-foreground">
-                              Avg: {(Math.min(row.avgUtil, 1) * 100).toFixed(0)}% · Hrs: {row.totalHours.toFixed(1)}
+                              Avg: {(Math.min(row.avgUtil, 1) * 100).toFixed(0)}% ·
+                              Hrs: {row.totalHours.toFixed(1)}
                             </span>
                           </div>
-                            {row.cells.map((c) => (
-                              <div key={c.ym} className="p-2 text-xs text-center">
-                                <UtilBadge util={c.util} />
-                              </div>
-                            ))}
-
+                          {row.cells.map((c) => (
+                            <div key={c.ym} className="p-2 text-xs text-center">
+                              <UtilBadge util={c.util} />
+                            </div>
+                          ))}
                         </div>
                       ))}
                   </div>
@@ -551,39 +701,14 @@ export default function DashboardPage() {
   );
 }
 
-function colorForUtil(util: number): string {
-  const pct = Math.min(util, 1.5); // cap color at 150% for color only
-  if (pct >= 1.01) return "bg-red-400";
-  if (pct >= 0.75) return "bg-teal-400";
-  if (pct >= 0.5) return "bg-green-400";
-  if (pct >= 0.25) return "bg-green-200";
-  return "bg-gray-200";
-}
-
-function UtilBadge({ util }: { util: number }) {
-  const pctDisplay = (util * 100).toFixed(0); // show actual value (can be > 100)
-  const overBy = util > 1 ? ((util - 1) * 100).toFixed(0) : null;
-  const cls = `rounded-md px-2 py-2 ${colorForUtil(util)} text-black/80 inline-flex items-center gap-1 justify-center`;
-  return (
-    <div className={cls} title={overBy ? `Over by ${overBy}%` : "Within capacity"}>
-      <span>{pctDisplay}%</span>
-      {overBy && (
-        <span
-          className="text-red-700 font-semibold"
-          aria-label={`Overallocated by ${overBy}%`}
-          title={`Overallocated by ${overBy}%`}
-        >
-          ⚠
-        </span>
-      )}
-    </div>
-  );
-}
+/* ----------------------------- small presentational ----------------------------- */
 
 function Tile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border p-4 bg-background">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
       <div className="text-2xl font-semibold">{value}</div>
     </div>
   );
