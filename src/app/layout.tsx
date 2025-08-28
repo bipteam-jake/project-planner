@@ -2,6 +2,7 @@
 import "./globals.css";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import Image from "next/image";
 
 export const metadata = {
   title: "Project Planner",
@@ -25,7 +26,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               Personnel
             </Link>
             <div className="ml-auto text-xs text-muted-foreground">
-              Multi-Project Planner
+              <Image
+                src="/BIP-logo.png"
+                alt="Company Logo"
+                width={140}     // adjust size as needed
+                height={40}
+                priority
+              />
             </div>
           </nav>
         </header>

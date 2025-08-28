@@ -12,23 +12,25 @@ import {
   isFullTimeLike,
   loadRoster,
   saveRoster,
-  toNumber, 
+  toNumber,
 } from "@/lib/storage";
 
 export default function PersonnelPage() {
   const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"All" | PersonType>("All");
+  const [hydrated, setHydrated] = useState(false);
 
   // Load roster on mount
   useEffect(() => {
     setRoster(loadRoster());
+    setHydrated(true);
   }, []);
 
-  // Autosave whenever roster changes
+  // Autosave only after initial load
   useEffect(() => {
-    saveRoster(roster);
-  }, [roster]);
+    if (hydrated) saveRoster(roster);
+  }, [roster, hydrated]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
