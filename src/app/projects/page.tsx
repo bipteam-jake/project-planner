@@ -10,9 +10,10 @@ import {
   currency,
   computeProjectTotals,
   createProject,
-  loadProjects,
   loadRoster,
-  saveProjects,
+  fetchProjects,
+  createProjectRemote,
+  deleteProjectRemote,
 } from "@/lib/storage";
 
 export default function ProjectsPage() {
@@ -21,40 +22,33 @@ export default function ProjectsPage() {
   const router = useRouter();
 
   useEffect(() => {
-    setProjects(loadProjects());
+    fetchProjects().then(setProjects);
     setRoster(loadRoster());
   }, []);
 
-  // Autosave whenever the array changes (create/duplicate/delete)
-  useEffect(() => {
-    saveProjects(projects);
-  }, [projects]);
-
-  function addProject(): void {
-    const newProject = createProject({ name: `Project ${projects.length + 1}` });
-    const updated = [newProject, ...projects];
-    setProjects(updated);
-    saveProjects(updated);
-    router.push(`/projects/${newProject.id}`);
+  async function addProject(): Promise<void> {
+    const project = createProject({ name: `Project ${projects.length + 1}` });
+    await createProjectRemote(project);
+    setProjects((prev) => [project, ...prev]);
   }
 
-  function removeProject(id: string): void {
+  async function removeProject(id: string): Promise<void> {
     if (!confirm("Delete this project?")) return;
+    await deleteProjectRemote(id);
     setProjects((prev) => prev.filter((p) => p.id !== id));
   }
 
-  function duplicateProject(id: string): void {
-    setProjects((prev) => {
-      const found = prev.find((p) => p.id === id);
-      if (!found) return prev;
-      const copy: Project = {
-        ...found,
-        id: crypto.randomUUID(),
-        name: `${found.name} (Copy)`,
-        updatedAt: Date.now(),
-      };
-      return [copy, ...prev];
-    });
+  async function duplicateProject(id: string): Promise<void> {
+    const found = projects.find((p) => p.id === id);
+    if (!found) return;
+    const copy: Project = {
+      ...found,
+      id: crypto.randomUUID(),
+      name: `${found.name} (Copy)`,
+      updatedAt: Date.now(),
+    };
+    await createProjectRemote(copy);
+    setProjects((prev) => [copy, ...prev]);
   }
 
   // (Optional) sort by last updated desc for nicer UX

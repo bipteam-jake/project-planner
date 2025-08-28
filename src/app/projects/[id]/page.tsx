@@ -10,10 +10,9 @@ import {
   Project,
   RosterPerson,
   MonthRow,
-  loadProjects,
-  saveProjects,
   loadRoster,
-  upsertProject,
+  fetchProject,
+  updateProjectRemote,
   labelFromISO,
   computeProjectTotals,
   computeMonthStats,
@@ -29,49 +28,50 @@ export default function ProjectDetailsPage() {
   const router = useRouter();
   const projectId = params?.id as string;
 
-  const [projects, setProjects] = useState<Project[]>([]);
   const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [project, setProject] = useState<Project | null>(null);
 
-  // Load all data once
   useEffect(() => {
-    setProjects(loadProjects());
+    fetchProject(projectId).then(setProject);
     setRoster(loadRoster());
-  }, []);
+  }, [projectId]);
 
-  // Pick current project
-  useEffect(() => {
-    const p = projects.find((x) => x.id === projectId);
-    if (p) setProject(p);
-  }, [projects, projectId]);
-
-  // AUTOSAVE on any project change
   useEffect(() => {
     if (!project) return;
-    const next = upsertProject(project, projects);
-    setProjects(next);
-    saveProjects(next);
+    updateProjectRemote(project).catch(() => {});
   }, [project]);
+
+  const members = useMemo(
+    () => (project ? roster.filter((r) => project.memberIds.includes(r.id)) : []),
+    [roster, project]
+  );
+  const totals = useMemo(
+    () =>
+      project
+        ? computeProjectTotals(project, roster)
+        : {
+            totalHours: 0,
+            laborCost: 0,
+            overheadCost: 0,
+            expenses: 0,
+            allIn: 0,
+            revenue: 0,
+            profit: 0,
+            margin: 0,
+          },
+    [project, roster]
+  );
 
   if (!project) {
     return (
       <div className="text-sm text-muted-foreground">
         Project not found.{" "}
-        <button className="underline" onClick={() => router.push("/projects")}>
+        <button className="underline" onClick={() => router.push("/projects")}> 
           Back to Projects
         </button>
       </div>
     );
   }
-
-  const members = useMemo(
-    () => roster.filter((r) => project.memberIds.includes(r.id)),
-    [roster, project.memberIds]
-  );
-  const totals = useMemo(
-    () => computeProjectTotals(project, roster),
-    [project, roster]
-  );
 
   function addMonth() {
     setProject((prev) => {
@@ -359,7 +359,7 @@ export default function ProjectDetailsPage() {
                     type="number"
                     min={0}
                     value={m.expenses}
-                    onChange={(e) => setExpense(m.id, e.target.value as any)}
+                      onChange={(e) => setExpense(m.id, Number(e.target.value))}
                   />
                 </div>
                 <div className="col-span-9 text-right font-medium">Revenue</div>
@@ -369,7 +369,7 @@ export default function ProjectDetailsPage() {
                     type="number"
                     min={0}
                     value={m.revenue}
-                    onChange={(e) => setRevenue(m.id, e.target.value as any)}
+                      onChange={(e) => setRevenue(m.id, Number(e.target.value))}
                   />
                 </div>
               </div>
