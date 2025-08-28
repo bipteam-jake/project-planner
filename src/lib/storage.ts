@@ -61,7 +61,7 @@ export const ROSTER_KEY = "quote_estimator.roster.v2";     // keep your v2
 export const PROJECTS_KEY = "quote_estimator.projects.v1";  // new key
 
 export const toNumber = (v: unknown, fb = 0) =>
-  isFinite(Number(v as any)) ? Number(v) : fb;
+  isFinite(Number(v as number | string)) ? Number(v) : fb;
 
 export const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, n));
@@ -109,20 +109,52 @@ export function saveRoster(r: RosterPerson[]) {
   localStorage.setItem(ROSTER_KEY, JSON.stringify(r));
 }
 
-export function loadProjects(): Project[] {
+/**
+ * Project persistence via API
+ */
+export async function fetchProjects(): Promise<Project[]> {
   try {
-    const raw = localStorage.getItem(PROJECTS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as Project[];
+    const res = await fetch("/api/projects", { cache: "no-store" });
+    if (!res.ok) throw new Error("failed");
+    return (await res.json()) as Project[];
   } catch {
     return [];
   }
 }
 
-export function saveProjects(p: Project[]) {
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(p));
+export async function fetchProject(id: string): Promise<Project | null> {
+  try {
+    const res = await fetch(`/api/projects/${id}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as Project;
+  } catch {
+    return null;
+  }
+}
+
+export async function createProjectRemote(p: Project): Promise<Project> {
+  const res = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(p),
+  });
+  if (!res.ok) throw new Error("Failed to create project");
+  return (await res.json()) as Project;
+}
+
+export async function updateProjectRemote(p: Project): Promise<Project> {
+  const res = await fetch(`/api/projects/${p.id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(p),
+  });
+  if (!res.ok) throw new Error("Failed to update project");
+  return (await res.json()) as Project;
+}
+
+export async function deleteProjectRemote(id: string): Promise<void> {
+  const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete project");
 }
 
 /** ===================== Project CRUD ===================== */

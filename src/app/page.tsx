@@ -4,11 +4,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Project, RosterPerson } from "@/lib/storage";
 import {
-  loadProjects,
   loadRoster,
   computeProjectTotals,
   calendarRollup,
   currency,
+  fetchProjects,
 } from "@/lib/storage";
 import {
   ResponsiveContainer,
@@ -28,7 +28,7 @@ export default function DashboardPage() {
 
   // Load data once on mount
   useEffect(() => {
-    setProjects(loadProjects());
+    fetchProjects().then(setProjects);
     setRoster(loadRoster());
   }, []);
 
