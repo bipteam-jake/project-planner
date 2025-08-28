@@ -71,7 +71,7 @@ export default function ProjectsPage() {
       </div>
 
       <div className="grid grid-cols-12 gap-2 text-sm font-medium text-muted-foreground">
-        <div className="col-span-3">Name</div>
+        <div className="col-span-3">Name / Description / Status</div>
         <div className="col-span-2">Start</div>
         <div className="col-span-2 text-right">Revenue</div>
         <div className="col-span-2 text-right">All-in</div>
@@ -83,9 +83,18 @@ export default function ProjectsPage() {
         const totals = computeProjectTotals(p, roster);
         return (
           <div key={p.id} className="grid grid-cols-12 gap-2 items-center">
-            <Link href={`/projects/${p.id}`} className="col-span-3 underline underline-offset-2">
-              {p.name}
-            </Link>
+            <div className="col-span-3">
+              <Link
+                href={`/projects/${p.id}`}
+                className="underline underline-offset-2"
+              >
+                {p.name}
+              </Link>
+              <div className="text-xs text-muted-foreground truncate">
+                {p.description}
+              </div>
+              <div className="text-xs text-muted-foreground">{p.status}</div>
+            </div>
             <div className="col-span-2">{p.startMonthISO}</div>
             <div className="col-span-2 text-right">{currency(totals.revenue)}</div>
             <div className="col-span-2 text-right">{currency(totals.allIn)}</div>
@@ -96,10 +105,16 @@ export default function ProjectsPage() {
               <Link className="text-sm underline" href={`/projects/${p.id}`}>
                 Edit
               </Link>
-              <button className="text-sm underline" onClick={() => duplicateProject(p.id)}>
+              <button
+                className="text-sm underline"
+                onClick={() => duplicateProject(p.id)}
+              >
                 Duplicate
               </button>
-              <button className="text-sm text-red-600 underline" onClick={() => removeProject(p.id)}>
+              <button
+                className="text-sm text-red-600 underline"
+                onClick={() => removeProject(p.id)}
+              >
                 Delete
               </button>
             </div>
