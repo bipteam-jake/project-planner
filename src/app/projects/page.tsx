@@ -2,6 +2,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Project, RosterPerson } from "@/lib/storage";
@@ -17,6 +18,7 @@ import {
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [roster, setRoster] = useState<RosterPerson[]>([]);
+  const router = useRouter();
 
   useEffect(() => {
     setProjects(loadProjects());
@@ -29,7 +31,11 @@ export default function ProjectsPage() {
   }, [projects]);
 
   function addProject(): void {
-    setProjects((prev) => [createProject({ name: `Project ${prev.length + 1}` }), ...prev]);
+    const newProject = createProject({ name: `Project ${projects.length + 1}` });
+    const updated = [newProject, ...projects];
+    setProjects(updated);
+    saveProjects(updated);
+    router.push(`/projects/${newProject.id}`);
   }
 
   function removeProject(id: string): void {
