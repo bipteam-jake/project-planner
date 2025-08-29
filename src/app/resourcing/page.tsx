@@ -1,7 +1,8 @@
-// /src/app/page.tsx
+// /src/app/resourcing/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -17,19 +18,6 @@ import {
 
 // ⬇️ NEW: use the repo abstraction (can later swap to `apiRepo`)
 import { localStorageRepo as repo } from "@/lib/repo";
-
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  CartesianGrid,
-} from "recharts";
 
 /* ---------------- helpers shared by dashboard ---------------- */
 
@@ -55,75 +43,6 @@ function inYmRange(ym: string, start?: string, end?: string) {
   return true;
 }
 
-type RollRow = {
-  ym: string;
-  label: string;
-  labor: number;
-  overhead: number;
-  expenses: number;
-  allIn: number;
-  revenue: number;
-  hours: number;
-};
-
-// Build rollup honoring project & people filters.
-// People filter impacts labor/hours/overhead; expenses/revenue are taken as-is.
-function buildCalendarRollupFiltered(
-  projects: Project[],
-  roster: RosterPerson[],
-  startYm?: string,
-  endYm?: string
-): RollRow[] {
-  const rows = new Map<string, RollRow>(); // ym -> roll
-
-  for (const p of projects) {
-    for (let i = 0; i < p.months.length; i++) {
-      const m = p.months[i];
-      const ym = ymFromStartIndex(p.startMonthISO, i);
-      if (!inYmRange(ym, startYm || undefined, endYm || undefined)) continue;
-
-      if (!rows.has(ym)) {
-        rows.set(ym, {
-          ym,
-          label: labelFromYm(ym),
-          labor: 0,
-          overhead: 0,
-          expenses: 0,
-          allIn: 0,
-          revenue: 0,
-          hours: 0,
-        });
-      }
-      const row = rows.get(ym)!;
-
-      const members = roster.filter((r) => p.memberIds.includes(r.id));
-
-      let monthHours = 0;
-      let monthLabor = 0;
-      for (const person of members) {
-        const alloc = toNumber(m.personAllocations[person.id] ?? 0, 0);
-        if (alloc <= 0) continue;
-        const base = toNumber(person.baseMonthlyHours, 0);
-        const hours = (base * alloc) / 100;
-        const rate = effectiveHourlyRate(person);
-        monthHours += hours;
-        monthLabor += hours * rate;
-      }
-
-      const monthOverhead = monthHours * p.overheadPerHour;
-
-      row.hours += monthHours;
-      row.labor += monthLabor;
-      row.overhead += monthOverhead;
-      row.expenses += m.expenses;
-      row.revenue += m.revenue;
-      row.allIn = row.labor + row.overhead + row.expenses;
-    }
-  }
-
-  return Array.from(rows.values()).sort((a, b) => (a.ym < b.ym ? -1 : 1));
-}
-
 /* --------- Utilization heatmap (expandable person → projects) --------- */
 
 type HeatMonth = { ym: string; label: string };
@@ -140,36 +59,36 @@ type HeatPersonRow = {
   byProject: HeatProjectRow[];
 };
 
-type HeatDepartmentRow = {
-  department: Department;
-  people: RosterPerson[];
-  total: { cells: HeatCell[]; totalHours: number; avgUtil: number };
-  byProject: HeatProjectRow[];
-};
-
-function buildDepartmentUtilizationMatrix(
+function buildUtilizationMatrixWithProjects(
   projects: Project[],
   roster: RosterPerson[],
+  selectedPeople: Set<string> | null,
   startYm?: string,
   endYm?: string
-): { months: HeatMonth[]; rows: HeatDepartmentRow[] } {
-  // months in window
-  const monthsSet = new Set<string>();
+): { months: HeatMonth[]; rows: HeatPersonRow[] } {
+  if (projects.length === 0) return { months: [], rows: [] };
+
+  // Find all unique months across all projects
+  const allMonths = new Set<string>();
   for (const p of projects) {
     for (let i = 0; i < p.months.length; i++) {
       const ym = ymFromStartIndex(p.startMonthISO, i);
-      if (inYmRange(ym, startYm || undefined, endYm || undefined)) monthsSet.add(ym);
+      if (inYmRange(ym, startYm, endYm)) {
+        allMonths.add(ym);
+      }
     }
   }
-  const months = Array.from(monthsSet.values()).sort();
+  const months = Array.from(allMonths).sort();
 
-  // Use all roster people (no individual people filtering)
-  const people = roster;
+  // Filter people based on selectedPeople
+  const people = selectedPeople
+    ? roster.filter((r) => selectedPeople.has(r.id))
+    : roster;
 
-  // person->ym total, and person->project->ym
+  // Build allocation maps
   const byPersonTotal: Record<string, Record<string, number>> = {};
-  const byPersonProject: Record<string, Record<string, Record<string, number>>> =
-    {};
+  const byPersonProject: Record<string, Record<string, Record<string, number>>> = {};
+
   for (const person of people) {
     byPersonTotal[person.id] = {};
     byPersonProject[person.id] = {};
@@ -182,19 +101,16 @@ function buildDepartmentUtilizationMatrix(
     for (let i = 0; i < p.months.length; i++) {
       const m = p.months[i];
       const ym = ymFromStartIndex(p.startMonthISO, i);
-      if (!monthsSet.has(ym)) continue;
+      if (!months.includes(ym)) continue;
 
       for (const personId of p.memberIds) {
-        if (!(personId in byPersonTotal)) continue; // filtered out
-        const person = roster.find((r) => r.id === personId);
-        if (!person) continue;
         const alloc = toNumber(m.personAllocations[personId] ?? 0, 0);
         if (alloc <= 0) continue;
+        const person = people.find((r) => r.id === personId);
+        if (!person) continue;
         const base = toNumber(person.baseMonthlyHours, 0);
         const hours = (base * alloc) / 100;
-
         byPersonTotal[personId][ym] += hours;
-
         if (!byPersonProject[personId][p.id])
           byPersonProject[personId][p.id] = {};
         if (!byPersonProject[personId][p.id][ym])
@@ -204,82 +120,39 @@ function buildDepartmentUtilizationMatrix(
     }
   }
 
-  // Group people by department
-  const departmentMap = new Map<Department, RosterPerson[]>();
-  for (const person of people) {
-    const dept = person.department;
-    if (!departmentMap.has(dept)) {
-      departmentMap.set(dept, []);
-    }
-    departmentMap.get(dept)!.push(person);
-  }
-
-  // Build department rows
-  const rows: HeatDepartmentRow[] = [];
-  for (const [dept, deptPeople] of departmentMap) {
-    if (deptPeople.length === 0) continue;
-
-    // Calculate total department capacity and utilization per month
+  const rows: HeatPersonRow[] = people.map((person) => {
+    const base = Math.max(1, toNumber(person.baseMonthlyHours, 0)); // avoid /0
+    // total row
     const totalCells: HeatCell[] = months.map((ym) => {
-      let totalHours = 0;
-      let totalCapacity = 0;
-      
-      for (const person of deptPeople) {
-        const personHours = byPersonTotal[person.id]?.[ym] ?? 0;
-        const personCapacity = toNumber(person.baseMonthlyHours, 0);
-        totalHours += personHours;
-        totalCapacity += personCapacity;
-      }
-      
-      const util = totalCapacity > 0 ? totalHours / totalCapacity : 0;
-      return { ym, label: labelFromYm(ym), hours: totalHours, util };
+      const hours = byPersonTotal[person.id]?.[ym] ?? 0;
+      return { ym, label: labelFromYm(ym), hours, util: hours / base };
     });
-
     const totalHours = totalCells.reduce((s, c) => s + c.hours, 0);
     const avgUtil = totalCells.length
       ? totalCells.reduce((s, c) => s + c.util, 0) / totalCells.length
       : 0;
 
-    // Get projects that have people from this department
-    const deptProjects = projects.filter(p => 
-      p.memberIds.some(id => deptPeople.some(person => person.id === id))
-    );
-
-    // Per-project rows for this department
-    const projRows: HeatProjectRow[] = deptProjects
+    // per-project rows
+    const projRows: HeatProjectRow[] = projects
+      .filter(
+        (p) =>
+          !!byPersonProject[person.id][p.id] &&
+          Object.values(byPersonProject[person.id][p.id]).some((h) => h > 0)
+      )
       .map((p) => {
         const cells: HeatCell[] = months.map((ym) => {
-          let projectHours = 0;
-          let projectCapacity = 0;
-          
-          for (const person of deptPeople) {
-            if (p.memberIds.includes(person.id)) {
-              const personProjectHours = byPersonProject[person.id]?.[p.id]?.[ym] ?? 0;
-              const personCapacity = toNumber(person.baseMonthlyHours, 0);
-              projectHours += personProjectHours;
-              projectCapacity += personCapacity;
-            }
-          }
-          
-          const util = projectCapacity > 0 ? projectHours / projectCapacity : 0;
-          return { ym, label: labelFromYm(ym), hours: projectHours, util };
+          const hours = byPersonProject[person.id][p.id][ym] ?? 0;
+          return { ym, label: labelFromYm(ym), hours, util: hours / base };
         });
-        
         const th = cells.reduce((s, c) => s + c.hours, 0);
         const au = cells.length
           ? cells.reduce((s, c) => s + c.util, 0) / cells.length
           : 0;
         return { project: p, cells, totalHours: th, avgUtil: au };
-      })
-      .filter(row => row.totalHours > 0); // Only show projects with hours
+      });
 
-    rows.push({ 
-      department: dept, 
-      people: deptPeople, 
-      total: { cells: totalCells, totalHours, avgUtil }, 
-      byProject: projRows 
-    });
-  }
+    return { person, total: { cells: totalCells, totalHours, avgUtil }, byProject: projRows };
+  });
 
   return {
     months: months.map((ym) => ({ ym, label: labelFromYm(ym) })),
@@ -298,21 +171,39 @@ function colorForUtil(util: number): string {
   return "bg-gray-200";
 }
 
-function UtilBadge({ util }: { util: number }) {
+function UtilBadge({ 
+  util, 
+  showCosts = false, 
+  person, 
+  hours = 0 
+}: { 
+  util: number; 
+  showCosts?: boolean; 
+  person?: RosterPerson; 
+  hours?: number; 
+}) {
   const pctDisplay = (util * 100).toFixed(0); // show real % (can exceed 100)
   const overBy = util > 1 ? ((util - 1) * 100).toFixed(0) : null;
-  const cls = `rounded-md px-2 py-2 ${colorForUtil(util)} text-black/80 inline-flex items-center gap-1 justify-center`;
+  const cls = `rounded-md px-2 py-2 ${colorForUtil(util)} text-black/80 inline-flex items-center gap-1 justify-center flex-col`;
+  
+  const cost = showCosts && person ? effectiveHourlyRate(person) * hours : 0;
+  
   return (
     <div className={cls} title={overBy ? `Over by ${overBy}%` : "Within capacity"}>
-      <span>{pctDisplay}%</span>
-      {overBy && (
-        <span
-          className="text-red-700 font-semibold"
-          aria-label={`Overallocated by ${overBy}%`}
-          title={`Overallocated by ${overBy}%`}
-        >
-          ⚠
-        </span>
+      <div className="flex items-center gap-1">
+        <span>{pctDisplay}%</span>
+        {overBy && (
+          <span
+            className="text-red-700 font-semibold"
+            aria-label={`Overallocated by ${overBy}%`}
+            title={`Overallocated by ${overBy}%`}
+          >
+            ⚠
+          </span>
+        )}
+      </div>
+      {showCosts && cost > 0 && (
+        <div className="text-xs">${cost.toFixed(0)}</div>
       )}
     </div>
   );
@@ -320,7 +211,7 @@ function UtilBadge({ util }: { util: number }) {
 
 /* ---------------------------------- page ---------------------------------- */
 
-export default function DashboardPage() {
+export default function ResourcingPage() {
   const [hydrated, setHydrated] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [roster, setRoster] = useState<RosterPerson[]>([]);
@@ -329,14 +220,18 @@ export default function DashboardPage() {
   const [startYm, setStartYm] = useState<string>("");
   const [endYm, setEndYm] = useState<string>("");
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
+  const [selectedPeople, setSelectedPeople] = useState<Set<string>>(new Set());
   const [selectedProjectTypes, setSelectedProjectTypes] = useState<Set<ProjectType>>(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
   const [selectedDepartments, setSelectedDepartments] = useState<Set<Department>>(new Set(["C-Suite", "BD", "Marketing", "Product", "Engineering", "Ops", "Software", "Admin", "Other"]));
 
-  // UI state for expanded departments in heatmap
-  const [expanded, setExpanded] = useState<Set<Department>>(new Set());
+  // UI state for expanded people in heatmap
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   
   // UI state for collapsible filters section
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
+  
+  // UI state for showing costs in heatmap
+  const [showCosts, setShowCosts] = useState(false);
 
   useEffect(() => {
     // ⬇️ repo-backed (can later swap to API by changing the import only)
@@ -345,6 +240,7 @@ export default function DashboardPage() {
     setProjects(ps);
     setRoster(rs);
     setSelectedProjects(new Set(ps.map((p) => p.id))); // default: all projects
+    setSelectedPeople(new Set(rs.map((r) => r.id))); // default: all people
     setHydrated(true);
   }, []);
 
@@ -355,62 +251,23 @@ export default function DashboardPage() {
     );
   }, [projects, selectedProjects, selectedProjectTypes]);
 
-  // No longer need filteredPeople since we're grouping by department
-
-  // Costs rollup (filtered)
-  const rolled = useMemo(
-    () =>
-      buildCalendarRollupFiltered(
-        filteredProjects,
-        roster,
-        startYm || undefined,
-        endYm || undefined
-      ),
-    [filteredProjects, roster, startYm, endYm]
-  );
-
-  // Summary over filtered window
-  const summary = useMemo(() => {
-    let labor = 0,
-      overhead = 0,
-      expenses = 0,
-      allIn = 0,
-      revenue = 0,
-      hours = 0;
-    for (const r of rolled) {
-      labor += r.labor;
-      overhead += r.overhead;
-      expenses += r.expenses;
-      allIn += r.allIn;
-      revenue += r.revenue;
-      hours += r.hours;
-    }
-    const profit = revenue - allIn;
-    const margin = revenue > 0 ? profit / revenue : 0;
-    return { labor, overhead, expenses, allIn, revenue, profit, margin, hours };
-  }, [rolled]);
-
-  // Cumulative series (for the line chart)
-  const cumulative = useMemo(() => {
-    let cumRev = 0;
-    let cumAllIn = 0;
-    return rolled.map((r) => {
-      cumRev += r.revenue;
-      cumAllIn += r.allIn;
-      return { label: r.label, cumRevenue: cumRev, cumAllIn };
-    });
-  }, [rolled]);
+  const filteredPeople = useMemo(() => {
+    if (selectedPeople.size === 0) return null;
+    const peopleByDepartment = roster.filter(p => selectedDepartments.has(p.department));
+    return new Set(peopleByDepartment.filter(p => selectedPeople.has(p.id)).map(p => p.id));
+  }, [roster, selectedPeople, selectedDepartments]);
 
   // Heatmap with expandable per-project rows
   const heat = useMemo(
     () =>
-      buildDepartmentUtilizationMatrix(
+      buildUtilizationMatrixWithProjects(
         filteredProjects,
         roster,
+        filteredPeople,
         startYm || undefined,
         endYm || undefined
       ),
-    [filteredProjects, roster, startYm, endYm]
+    [filteredProjects, roster, filteredPeople, startYm, endYm]
   );
 
   // Project selection helpers
@@ -429,6 +286,21 @@ export default function DashboardPage() {
     setSelectedProjects(new Set());
   }
 
+  // People selection helpers
+  function togglePerson(id: string, on: boolean) {
+    setSelectedPeople((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+  function selectAllPeople() {
+    setSelectedPeople(new Set(roster.map((r) => r.id)));
+  }
+  function clearPeople() {
+    setSelectedPeople(new Set());
+  }
 
   // Project type selection helpers
   function toggleProjectType(type: ProjectType, on: boolean) {
@@ -463,11 +335,11 @@ export default function DashboardPage() {
   }
 
   // Expand/collapse
-  function toggleExpand(department: Department) {
+  function toggleExpand(personId: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(department)) next.delete(department);
-      else next.add(department);
+      if (next.has(personId)) next.delete(personId);
+      else next.add(personId);
       return next;
     });
   }
@@ -477,7 +349,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <h1 className="text-2xl font-bold">Resourcing</h1>
 
       {/* Filters */}
       <div className="rounded-xl border space-y-4">
@@ -629,205 +501,212 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* People multi-select */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">People</div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={selectAllPeople}>
+                Select all
+              </Button>
+              <Button variant="outline" onClick={clearPeople}>
+                Clear
+              </Button>
+            </div>
+          </div>
+          {roster.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No people yet. Add them on the Personnel page.
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {roster.map((r) => {
+                const checked = selectedPeople.has(r.id);
+                const departmentMatch = selectedDepartments.has(r.department);
+                const isActive = checked && departmentMatch;
+                return (
+                  <label
+                    key={r.id}
+                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm transition-opacity ${
+                      isActive ? "bg-secondary" : 
+                      departmentMatch ? "bg-background" : "bg-background opacity-40"
+                    }`}
+                    title={!departmentMatch ? `${r.department} department is not selected` : ""}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={!departmentMatch}
+                      onChange={(e) => togglePerson(r.id, e.target.checked)}
+                    />
+                    <span className={`truncate ${!departmentMatch ? "line-through text-muted-foreground" : ""}`}>
+                      {r.name} <span className="text-xs text-muted-foreground">({r.department})</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
         </div>
       </div>
 
-      {/* Summary tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-        <Tile label="Hours" value={summary.hours.toFixed(1)} />
-        <Tile label="Labor cost" value={currency(summary.labor)} />
-        <Tile label="Overhead cost" value={currency(summary.overhead)} />
-        <Tile label="Expenses" value={currency(summary.expenses)} />
-        <Tile label="All-in cost" value={currency(summary.allIn)} />
-        <Tile label="Revenue" value={currency(summary.revenue)} />
-        <Tile label="Margin %" value={`${(summary.margin * 100).toFixed(1)}%`} />
-      </div>
-
-      {/* Stacked Bar: monthly costs + revenue line */}
-      <div className="rounded-xl border p-4">
-        <div className="text-sm font-semibold mb-2">
-          Monthly Costs (Labor, Overhead, Expenses) vs Revenue
-        </div>
-        <div style={{ width: "100%", height: 320 }}>
-          <ResponsiveContainer>
-            <BarChart data={rolled}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="expenses" stackId="a" name="Expenses" fill="#9ca3af" />
-              <Bar dataKey="labor" stackId="a" name="Labor" fill="#60a5fa" />
-              <Bar dataKey="overhead" stackId="a" name="Overhead" fill="#f59e0b" />
-              <Line
-                type="monotone"
-                dataKey="revenue"
-                name="Revenue"
-                stroke="#10b981"
-                strokeWidth={2}
-                dot={{ r: 3 }}
+      {/* Utilization Heatmap */}
+      <div className="rounded-xl border p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold">
+            Utilization Heatmap (Expandable by Project)
+          </div>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={showCosts}
+                onChange={(e) => setShowCosts(e.target.checked)}
+                className="rounded"
               />
-            </BarChart>
-          </ResponsiveContainer>
+              Show Costs
+            </label>
+            <div className="text-xs text-muted-foreground">
+              Click person names to expand/collapse project details
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Cumulative: Revenue vs All-in */}
-      <div className="rounded-xl border p-4">
-        <div className="text-sm font-semibold mb-2">
-          Cumulative Revenue vs All-in
-        </div>
-        <div style={{ width: "100%", height: 320 }}>
-          <ResponsiveContainer>
-            <LineChart
-              data={rolled.map((r, idx) => ({
-                label: r.label,
-                cumRevenue: cumulative[idx]?.cumRevenue ?? 0,
-                cumAllIn: cumulative[idx]?.cumAllIn ?? 0,
-              }))}
-            >
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey="cumRevenue"
-                name="Cum. Revenue"
-                stroke="#10b981"
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="cumAllIn"
-                name="Cum. All-in"
-                stroke="#ef4444"
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Utilization Heatmap (expandable per person → per project) */}
-      <div className="rounded-xl border p-4 space-y-3">
-        <div className="text-sm font-semibold">Department Utilization</div>
-
-        {heat.months.length === 0 || heat.rows.length === 0 ? (
+        {heat.months.length === 0 ? (
           <div className="text-sm text-muted-foreground">
-            No data in the selected window.
+            No data to display. Adjust your filters or add projects/people.
           </div>
         ) : (
-          <div className="overflow-auto">
-            <div className="min-w-[820px]">
-              {/* header row */}
-              <div
-                className="grid"
-                style={{
-                  gridTemplateColumns: `320px repeat(${heat.months.length}, 1fr)`,
-                }}
-              >
-                <div className="p-2 text-xs text-muted-foreground">
-                  Department / Project
+          <>
+            {/* Header Row */}
+            <div
+              className="grid gap-2 items-center"
+              style={{
+                gridTemplateColumns: `260px repeat(${heat.months.length}, 1fr)`,
+              }}
+            >
+              <div className="text-sm font-medium">Person / Project</div>
+              {heat.months.map((month) => (
+                <div key={month.ym} className="text-xs text-center font-medium">
+                  {month.label}
                 </div>
-                {heat.months.map((m) => (
-                  <div
-                    key={m.ym}
-                    className="p-2 text-xs text-center text-muted-foreground"
-                  >
-                    {m.label}
-                  </div>
-                ))}
-              </div>
+              ))}
+            </div>
 
-              {/* rows */}
-              {heat.rows.map(({ department, people, total, byProject }) => {
-                const isOpen = expanded.has(department);
+            {/* Data Rows */}
+            <div className="space-y-2">
+              {heat.rows.map(({ person, total, byProject }) => {
+                const isOpen = expanded.has(person.id);
                 return (
-                  <div key={department} className="border-t">
-                    {/* department summary row */}
+                  <div key={person.id} className="border-t">
+                    {/* person summary row */}
                     <div
                       className="grid items-center hover:bg-muted/40 cursor-pointer"
                       style={{
-                        gridTemplateColumns: `320px repeat(${total.cells.length}, 1fr)`,
+                        gridTemplateColumns: `260px repeat(${total.cells.length}, 1fr)`,
                       }}
-                      onClick={() => toggleExpand(department)}
-                      title="Click to expand"
+                      onClick={() => toggleExpand(person.id)}
                     >
-                      <div className="p-2 text-sm">
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex h-5 w-5 items-center justify-center rounded border text-xs bg-background">
-                            {isOpen ? "–" : "+"}
-                          </span>
-                          <span className="font-medium">{department}</span>
-                        </div>
-                        <div className="ml-7 text-xs text-muted-foreground mt-1">
-                          {people.length} people · Avg: {(Math.min(total.avgUtil, 1) * 100).toFixed(0)}% · Total hrs: {total.totalHours.toFixed(1)}
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <span className={isOpen ? "rotate-90" : ""}>▶</span>
+                        <span className="font-medium truncate">{person.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          ({person.department})
+                        </span>
                       </div>
-                      {total.cells.map((c) => (
-                        <div key={c.ym} className="p-2 text-xs text-center">
-                          <UtilBadge util={c.util} />
+                      {total.cells.map((cell) => (
+                        <div key={cell.ym} className="flex justify-center">
+                          <UtilBadge 
+                            util={cell.util} 
+                            showCosts={showCosts} 
+                            person={person} 
+                            hours={cell.hours} 
+                          />
                         </div>
                       ))}
                     </div>
 
-                    {/* expanded per-project rows */}
+                    {/* per-project rows */}
                     {isOpen &&
-                      byProject.map((row) => (
+                      byProject.map(({ project, cells }) => (
                         <div
-                          key={row.project.id}
-                          className="grid items-center"
+                          key={project.id}
+                          className="grid items-center bg-muted/20"
                           style={{
-                            gridTemplateColumns: `320px repeat(${row.cells.length}, 1fr)`,
+                            gridTemplateColumns: `260px repeat(${cells.length}, 1fr)`,
                           }}
                         >
-                          <div className="p-2 text-sm pl-10 flex items-center justify-between">
-                            <span className="truncate text-muted-foreground">
-                              {row.project.name}
-                            </span>
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              Avg: {(Math.min(row.avgUtil, 1) * 100).toFixed(0)}% ·
-                              Hrs: {row.totalHours.toFixed(1)}
-                            </span>
+                          <div className="pl-8 text-sm truncate" title={project.name}>
+                            └ <Link href={`/projects/${project.id}`} className="underline underline-offset-2 hover:text-blue-600">{project.name}</Link> ({project.projectType})
                           </div>
-                          {row.cells.map((c) => (
-                            <div key={c.ym} className="p-2 text-xs text-center">
-                              <UtilBadge util={c.util} />
-                            </div>
-                          ))}
+                          {cells.map((cell) => {
+                            const cost = showCosts && person ? effectiveHourlyRate(person) * cell.hours : 0;
+                            return (
+                              <div key={cell.ym} className="flex justify-center">
+                                <div className="text-xs flex flex-col items-center">
+                                  <div>{cell.hours.toFixed(1)}h</div>
+                                  {showCosts && cost > 0 && (
+                                    <div className="text-muted-foreground">${cost.toFixed(0)}</div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       ))}
                   </div>
                 );
               })}
             </div>
-          </div>
+
+            {/* Monthly Cost Totals Row */}
+            {showCosts && (
+              <div className="border-t pt-2">
+                <div
+                  className="grid items-center bg-muted/30 rounded p-2"
+                  style={{
+                    gridTemplateColumns: `260px repeat(${heat.months.length}, 1fr)`,
+                  }}
+                >
+                  <div className="text-sm font-semibold">Monthly Totals</div>
+                  {heat.months.map((month) => {
+                    // Calculate total cost for this month across all people and projects
+                    let monthlyTotal = 0;
+                    
+                    heat.rows.forEach(({ person, byProject }) => {
+                      byProject.forEach(({ cells }) => {
+                        const cell = cells.find(c => c.ym === month.ym);
+                        if (cell) {
+                          monthlyTotal += effectiveHourlyRate(person) * cell.hours;
+                        }
+                      });
+                    });
+                    
+                    return (
+                      <div key={month.ym} className="flex justify-center">
+                        <div className="text-sm font-semibold text-blue-600">
+                          ${monthlyTotal.toFixed(0)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Legend */}
+            <div className="flex items-center gap-4 text-xs text-muted-foreground pt-4 border-t">
+              <span>Legend:</span>
+              <span className="inline-block h-3 w-5 rounded bg-gray-200" /> 0–24%
+              <span className="inline-block h-3 w-5 rounded bg-green-200" /> 25–49%
+              <span className="inline-block h-3 w-5 rounded bg-green-400" /> 50–74%
+              <span className="inline-block h-3 w-5 rounded bg-teal-400" /> 75–100%
+              <span className="inline-block h-3 w-5 rounded bg-red-400" /> &gt; 100%
+            </div>
+          </>
         )}
-
-        {/* Legend */}
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="inline-block h-3 w-5 rounded bg-gray-200" /> 0–24%
-          <span className="inline-block h-3 w-5 rounded bg-green-200" /> 25–49%
-          <span className="inline-block h-3 w-5 rounded bg-green-400" /> 50–74%
-          <span className="inline-block h-3 w-5 rounded bg-teal-400" /> 75–100%
-          <span className="inline-block h-3 w-5 rounded bg-red-400" /> &gt; 100%
-        </div>
       </div>
-    </div>
-  );
-}
-
-/* ----------------------------- small presentational ----------------------------- */
-
-function Tile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border p-4 bg-background">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <div className="text-2xl font-semibold">{value}</div>
     </div>
   );
 }
