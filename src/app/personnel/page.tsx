@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   RosterPerson,
   PersonType,
+  Department,
   FTCompMode,
   isFullTimeLike,
   toNumber,
@@ -20,6 +21,7 @@ export default function PersonnelPage() {
   const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"All" | PersonType>("All");
+  const [departmentFilter, setDepartmentFilter] = useState<"All" | Department>("All");
   const [hydrated, setHydrated] = useState(false);
 
   // Load roster on mount
@@ -38,9 +40,10 @@ export default function PersonnelPage() {
     return roster.filter(
       (p) =>
         (q === "" || p.name.toLowerCase().includes(q)) &&
-        (typeFilter === "All" || p.personType === typeFilter)
+        (typeFilter === "All" || p.personType === typeFilter) &&
+        (departmentFilter === "All" || p.department === departmentFilter)
     );
-  }, [roster, search, typeFilter]);
+  }, [roster, search, typeFilter, departmentFilter]);
 
   function addPerson() {
     setRoster((prev) => [
@@ -49,6 +52,7 @@ export default function PersonnelPage() {
         id: crypto.randomUUID(),
         name: "New Person",
         personType: "Full-Time",
+        department: "Other",
         compMode: "monthly",
         monthlySalary: 8000,
         annualSalary: 0,
@@ -94,6 +98,25 @@ export default function PersonnelPage() {
             <option>Contractor</option>
           </select>
         </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Department</span>
+          <select
+            className="border rounded-md px-2 py-2 bg-background"
+            value={departmentFilter}
+            onChange={(e) => setDepartmentFilter(e.target.value as "All" | Department)}
+          >
+            <option value="All">All</option>
+            <option value="C-Suite">C-Suite</option>
+            <option value="BD">BD</option>
+            <option value="Marketing">Marketing</option>
+            <option value="Product">Product</option>
+            <option value="Engineering">Engineering</option>
+            <option value="Ops">Ops</option>
+            <option value="Software">Software</option>
+            <option value="Admin">Admin</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
         <div className="flex-1" />
         <Button onClick={addPerson} className="gap-2">
           <Plus className="h-4 w-4" /> Add person
@@ -102,9 +125,10 @@ export default function PersonnelPage() {
 
       {/* Table header */}
       <div className="grid grid-cols-12 gap-2 text-sm font-medium text-muted-foreground mt-2">
-        <div className="col-span-3">Name</div>
+        <div className="col-span-2">Name</div>
         <div className="col-span-2">Type</div>
-        <div className="col-span-4 text-right">Compensation</div>
+        <div className="col-span-2">Department</div>
+        <div className="col-span-3 text-right">Compensation</div>
         <div className="col-span-2 text-right">Base Monthly Hours</div>
         <div className="col-span-1 text-right">Actions</div>
       </div>
@@ -116,7 +140,7 @@ export default function PersonnelPage() {
           <div key={p.id} className="grid grid-cols-12 gap-2 items-center">
             {/* Name */}
             <Input
-              className="col-span-3"
+              className="col-span-2"
               value={p.name}
               onChange={(e) => update(p.id, { name: e.target.value })}
             />
@@ -150,8 +174,27 @@ export default function PersonnelPage() {
               </select>
             </div>
 
+            {/* Department */}
+            <div className="col-span-2">
+              <select
+                className="w-full border rounded-md px-2 py-2 bg-background"
+                value={p.department}
+                onChange={(e) => update(p.id, { department: e.target.value as Department })}
+              >
+                <option value="C-Suite">C-Suite</option>
+                <option value="BD">BD</option>
+                <option value="Marketing">Marketing</option>
+                <option value="Product">Product</option>
+                <option value="Engineering">Engineering</option>
+                <option value="Ops">Ops</option>
+                <option value="Software">Software</option>
+                <option value="Admin">Admin</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
             {/* Compensation */}
-            <div className="col-span-4 flex items-center justify-end gap-2">
+            <div className="col-span-3 flex items-center justify-end gap-2">
               {fullLike ? (
                 <>
                   <select

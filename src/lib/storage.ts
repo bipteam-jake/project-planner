@@ -14,10 +14,29 @@ export type PersonType =
 
 export type FTCompMode = "monthly" | "annual";
 
+export type ProjectType = 
+  | "Test"
+  | "BD"
+  | "Active"
+  | "Completed"
+  | "Cancelled";
+
+export type Department = 
+  | "C-Suite"
+  | "BD"
+  | "Marketing"
+  | "Product"
+  | "Engineering"
+  | "Ops"
+  | "Software"
+  | "Admin"
+  | "Other";
+
 export interface RosterPerson {
   id: string;
   name: string;
   personType: PersonType;
+  department: Department;
   compMode?: FTCompMode;      // FT-like only
   monthlySalary?: number;     // FT-like
   annualSalary?: number;      // FT-like
@@ -38,6 +57,7 @@ export interface Project {
   name: string;
   description: string;
   status: string;
+  projectType: ProjectType;
   overheadPerHour: number;   // $/hr
   targetMarginPct: number;   // 0..1
   startMonthISO: string;     // YYYY-MM
@@ -136,6 +156,7 @@ export function createProject(partial?: Partial<Project>): Project {
     name: partial?.name ?? "New Project",
     description: partial?.description ?? "",
     status: partial?.status ?? "Active",
+    projectType: partial?.projectType ?? "Active",
     overheadPerHour: partial?.overheadPerHour ?? 15,
     targetMarginPct: partial?.targetMarginPct ?? 0.35,
     startMonthISO: start,

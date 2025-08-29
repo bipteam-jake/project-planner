@@ -19,6 +19,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/" className="font-semibold">
               Dashboard
             </Link>
+            <Link href="/resourcing" className="text-muted-foreground hover:text-foreground">
+              Resourcing
+            </Link>
             <Link href="/projects" className="text-muted-foreground hover:text-foreground">
               Projects
             </Link>
