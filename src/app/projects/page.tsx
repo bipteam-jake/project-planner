@@ -80,7 +80,8 @@ export default function ProjectsPage() {
       </div>
 
       <div className="grid grid-cols-12 gap-2 text-sm font-medium text-muted-foreground">
-        <div className="col-span-3">Name</div>
+        <div className="col-span-2">Name</div>
+        <div className="col-span-1">Type</div>
         <div className="col-span-2">Start</div>
         <div className="col-span-2 text-right">Revenue</div>
         <div className="col-span-2 text-right">All-in</div>
@@ -97,9 +98,10 @@ export default function ProjectsPage() {
 
         return (
           <div key={p.id} className="grid grid-cols-12 gap-2 items-center">
-            <Link href={`/projects/${p.id}`} className="col-span-3 underline underline-offset-2">
+            <Link href={`/projects/${p.id}`} className="col-span-2 underline underline-offset-2">
               {p.name}
             </Link>
+            <div className="col-span-1">{p.projectType}</div>
             <div className="col-span-2">{p.startMonthISO}</div>
             <div className="col-span-2 text-right">{currency(totals.revenue)}</div>
             <div className="col-span-2 text-right">{currency(totals.allIn)}</div>

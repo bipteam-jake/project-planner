@@ -1,5 +1,5 @@
 // src/lib/repo.ts
-import { Project, RosterPerson } from "@/lib/storage";
+import { Project, RosterPerson, ProjectType, Department } from "@/lib/storage";
 
 /**
  * Stable keys. Update these ONLY if you also migrate existing data.
@@ -78,14 +78,52 @@ export interface Repo {
 export const localStorageRepo: Repo = {
   loadProjects(): Project[] {
     migrateIfNeeded();
-    return readJSON<Project[]>(PROJECTS_KEY) ?? [];
+    const projects = readJSON<Project[]>(PROJECTS_KEY) ?? [];
+    
+    // Migrate projects that don't have projectType field
+    let needsMigration = false;
+    const migratedProjects = projects.map(project => {
+      // Check if projectType is missing or invalid
+      if (!project.projectType || typeof project.projectType !== 'string') {
+        needsMigration = true;
+        return { ...project, projectType: 'Active' as ProjectType };
+      }
+      return project;
+    });
+    
+    // If we migrated any projects, save them back
+    if (needsMigration) {
+      console.log('Migrating projects to add projectType field');
+      writeJSON(PROJECTS_KEY, migratedProjects);
+    }
+    
+    return migratedProjects;
   },
   saveProjects(p: Project[]): void {
     writeJSON(PROJECTS_KEY, p);
   },
   loadRoster(): RosterPerson[] {
     migrateIfNeeded();
-    return readJSON<RosterPerson[]>(ROSTER_KEY) ?? [];
+    const roster = readJSON<RosterPerson[]>(ROSTER_KEY) ?? [];
+    
+    // Migrate roster that don't have department field
+    let needsMigration = false;
+    const migratedRoster = roster.map(person => {
+      // Check if department is missing or invalid
+      if (!person.department || typeof person.department !== 'string') {
+        needsMigration = true;
+        return { ...person, department: 'Other' as Department };
+      }
+      return person;
+    });
+    
+    // If we migrated any people, save them back
+    if (needsMigration) {
+      console.log('Migrating roster to add department field');
+      writeJSON(ROSTER_KEY, migratedRoster);
+    }
+    
+    return migratedRoster;
   },
   saveRoster(r: RosterPerson[]): void {
     writeJSON(ROSTER_KEY, r);

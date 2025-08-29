@@ -10,6 +10,7 @@ import {
   Project,
   RosterPerson,
   MonthRow,
+  ProjectType,
   upsertProject,
   labelFromISO,
   computeProjectTotals,
@@ -244,7 +245,24 @@ export default function ProjectDetailsPage() {
       </div>
 
       {/* Project Inputs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="space-y-1">
+          <div className="text-sm font-medium">Project Type</div>
+          <select
+            className="border rounded-md px-3 py-2 bg-background w-full"
+            value={project.projectType}
+            onChange={(e) =>
+              updateProject((p) => ({ ...p, projectType: e.target.value as ProjectType }))
+            }
+          >
+            <option value="Test">Test</option>
+            <option value="BD">BD</option>
+            <option value="Active">Active</option>
+            <option value="Completed">Completed</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+        </div>
+
         <div className="space-y-1">
           <div className="text-sm font-medium">Start month</div>
           <input

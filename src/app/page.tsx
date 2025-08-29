@@ -2,12 +2,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   currency,
   Project,
+  ProjectType,
   RosterPerson,
+  Department,
   toNumber,
   effectiveHourlyRate,
 } from "@/lib/storage";
@@ -286,9 +289,14 @@ export default function DashboardPage() {
   const [endYm, setEndYm] = useState<string>("");
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
   const [selectedPeople, setSelectedPeople] = useState<Set<string>>(new Set());
+  const [selectedProjectTypes, setSelectedProjectTypes] = useState<Set<ProjectType>>(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
+  const [selectedDepartments, setSelectedDepartments] = useState<Set<Department>>(new Set(["C-Suite", "BD", "Marketing", "Product", "Engineering", "Ops", "Software", "Admin", "Other"]));
 
   // UI state for expanded people in heatmap
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  
+  // UI state for collapsible filters section
+  const [filtersCollapsed, setFiltersCollapsed] = useState(false);
 
   useEffect(() => {
     // ⬇️ repo-backed (can later swap to API by changing the import only)
@@ -303,8 +311,16 @@ export default function DashboardPage() {
 
   const filteredProjects = useMemo(() => {
     if (selectedProjects.size === 0) return [];
-    return projects.filter((p) => selectedProjects.has(p.id));
-  }, [projects, selectedProjects]);
+    return projects.filter((p) => 
+      selectedProjects.has(p.id) && selectedProjectTypes.has(p.projectType)
+    );
+  }, [projects, selectedProjects, selectedProjectTypes]);
+
+  const filteredPeople = useMemo(() => {
+    if (selectedPeople.size === 0) return null;
+    const peopleByDepartment = roster.filter(p => selectedDepartments.has(p.department));
+    return new Set(peopleByDepartment.filter(p => selectedPeople.has(p.id)).map(p => p.id));
+  }, [roster, selectedPeople, selectedDepartments]);
 
   // Costs rollup (filtered)
   const rolled = useMemo(
@@ -312,11 +328,11 @@ export default function DashboardPage() {
       buildCalendarRollupFiltered(
         filteredProjects,
         roster,
-        selectedPeople,
+        filteredPeople,
         startYm || undefined,
         endYm || undefined
       ),
-    [filteredProjects, roster, selectedPeople, startYm, endYm]
+    [filteredProjects, roster, filteredPeople, startYm, endYm]
   );
 
   // Summary over filtered window
@@ -357,11 +373,11 @@ export default function DashboardPage() {
       buildUtilizationMatrixWithProjects(
         filteredProjects,
         roster,
-        selectedPeople,
+        filteredPeople,
         startYm || undefined,
         endYm || undefined
       ),
-    [filteredProjects, roster, selectedPeople, startYm, endYm]
+    [filteredProjects, roster, filteredPeople, startYm, endYm]
   );
 
   // Project selection helpers
@@ -396,6 +412,38 @@ export default function DashboardPage() {
     setSelectedPeople(new Set());
   }
 
+  // Project type selection helpers
+  function toggleProjectType(type: ProjectType, on: boolean) {
+    setSelectedProjectTypes((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(type);
+      else next.delete(type);
+      return next;
+    });
+  }
+  function selectAllProjectTypes() {
+    setSelectedProjectTypes(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
+  }
+  function clearProjectTypes() {
+    setSelectedProjectTypes(new Set());
+  }
+
+  // Department selection helpers
+  function toggleDepartment(department: Department, on: boolean) {
+    setSelectedDepartments((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(department);
+      else next.delete(department);
+      return next;
+    });
+  }
+  function selectAllDepartments() {
+    setSelectedDepartments(new Set(["C-Suite", "BD", "Marketing", "Product", "Engineering", "Ops", "Software", "Admin", "Other"]));
+  }
+  function clearDepartments() {
+    setSelectedDepartments(new Set());
+  }
+
   // Expand/collapse
   function toggleExpand(personId: string) {
     setExpanded((prev) => {
@@ -414,7 +462,20 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold">Dashboard</h1>
 
       {/* Filters */}
-      <div className="rounded-xl border p-4 space-y-4">
+      <div className="rounded-xl border space-y-4">
+        {/* Filters Header */}
+        <div 
+          className="flex items-center justify-between p-4 pb-2 cursor-pointer hover:bg-muted/50"
+          onClick={() => setFiltersCollapsed(!filtersCollapsed)}
+        >
+          <h2 className="text-lg font-semibold">Filters</h2>
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+            {filtersCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </Button>
+        </div>
+        
+        {/* Collapsible Filters Content */}
+        <div className={`px-4 pb-4 space-y-4 transition-all duration-300 ease-in-out overflow-hidden ${filtersCollapsed ? "max-h-0 opacity-0 pb-0" : "max-h-[2000px] opacity-100"}`}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <div className="text-sm font-medium mb-1">Start month</div>
@@ -442,6 +503,41 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Project Type multi-select */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">Project Types</div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={selectAllProjectTypes}>
+                Select all
+              </Button>
+              <Button variant="outline" onClick={clearProjectTypes}>
+                Clear
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(["Test", "BD", "Active", "Completed", "Cancelled"] as const).map((type) => {
+              const checked = selectedProjectTypes.has(type);
+              return (
+                <label
+                  key={type}
+                  className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${
+                    checked ? "bg-secondary" : "bg-background"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => toggleProjectType(type, e.target.checked)}
+                  />
+                  <span className="truncate">{type}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Project multi-select */}
         <div className="space-y-2">
           <div className="text-sm font-medium">Projects</div>
@@ -453,24 +549,66 @@ export default function DashboardPage() {
             <div className="flex flex-wrap gap-2">
               {projects.map((p) => {
                 const checked = selectedProjects.has(p.id);
+                const typeMatch = selectedProjectTypes.has(p.projectType);
+                const isActive = checked && typeMatch;
                 return (
                   <label
                     key={p.id}
-                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${
-                      checked ? "bg-secondary" : "bg-background"
+                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm transition-opacity ${
+                      isActive ? "bg-secondary" : 
+                      typeMatch ? "bg-background" : "bg-background opacity-40"
                     }`}
+                    title={!typeMatch ? `${p.projectType} type is not selected` : ""}
                   >
                     <input
                       type="checkbox"
                       checked={checked}
+                      disabled={!typeMatch}
                       onChange={(e) => toggleProject(p.id, e.target.checked)}
                     />
-                    <span className="truncate">{p.name}</span>
+                    <span className={`truncate ${!typeMatch ? "line-through text-muted-foreground" : ""}`}>
+                      {p.name} <span className="text-xs text-muted-foreground">({p.projectType})</span>
+                    </span>
                   </label>
                 );
               })}
             </div>
           )}
+        </div>
+
+        {/* Department multi-select */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">Departments</div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={selectAllDepartments}>
+                Select all
+              </Button>
+              <Button variant="outline" onClick={clearDepartments}>
+                Clear
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(["C-Suite", "BD", "Marketing", "Product", "Engineering", "Ops", "Software", "Admin", "Other"] as const).map((department) => {
+              const checked = selectedDepartments.has(department);
+              return (
+                <label
+                  key={department}
+                  className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${
+                    checked ? "bg-secondary" : "bg-background"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => toggleDepartment(department, e.target.checked)}
+                  />
+                  <span className="truncate">{department}</span>
+                </label>
+              );
+            })}
+          </div>
         </div>
 
         {/* People multi-select */}
@@ -494,24 +632,32 @@ export default function DashboardPage() {
             <div className="flex flex-wrap gap-2">
               {roster.map((r) => {
                 const checked = selectedPeople.has(r.id);
+                const departmentMatch = selectedDepartments.has(r.department);
+                const isActive = checked && departmentMatch;
                 return (
                   <label
                     key={r.id}
-                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${
-                      checked ? "bg-secondary" : "bg-background"
+                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm transition-opacity ${
+                      isActive ? "bg-secondary" : 
+                      departmentMatch ? "bg-background" : "bg-background opacity-40"
                     }`}
+                    title={!departmentMatch ? `${r.department} department is not selected` : ""}
                   >
                     <input
                       type="checkbox"
                       checked={checked}
+                      disabled={!departmentMatch}
                       onChange={(e) => togglePerson(r.id, e.target.checked)}
                     />
-                    <span className="truncate">{r.name}</span>
+                    <span className={`truncate ${!departmentMatch ? "line-through text-muted-foreground" : ""}`}>
+                      {r.name} <span className="text-xs text-muted-foreground">({r.department})</span>
+                    </span>
                   </label>
                 );
               })}
             </div>
           )}
+        </div>
         </div>
       </div>
 
