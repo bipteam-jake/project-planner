@@ -2,80 +2,16 @@
 "use client";
 
 import { v4 as uuid } from "uuid";
-
-/** ===================== Types ===================== */
-
-export type PersonType =
-  | "Full-Time"
-  | "FT Resource"
-  | "Part-Time"
-  | "PT Resource"
-  | "Contractor";
-
-export type FTCompMode = "monthly" | "annual";
-
-export type ProjectType = 
-  | "Test"
-  | "BD"
-  | "Active"
-  | "Completed"
-  | "Cancelled";
-
-export type Department = 
-  | "C-Suite"
-  | "BD"
-  | "Marketing"
-  | "Product"
-  | "Engineering"
-  | "Ops"
-  | "Software"
-  | "Admin"
-  | "Other";
-
-export interface RosterPerson {
-  id: string;
-  name: string;
-  personType: PersonType;
-  department: Department;
-  compMode?: FTCompMode;      // FT-like only
-  monthlySalary?: number;     // FT-like
-  annualSalary?: number;      // FT-like
-  hourlyRate?: number;        // hourly-like
-  baseMonthlyHours: number;   // e.g., 160
-}
-
-export interface MonthRow {
-  id: string;
-  label: string;                           // derived from startMonthISO + index; read-only in UI
-  personAllocations: Record<string, number>; // personId -> allocation % (0..100)
-  expenses: number;                        // $ for the month
-  revenue: number;                         // $ for the month (phased revenue)
-}
-
-export interface Project {
-  id: string;
-  name: string;
-  description: string;
-  status: string;
-  projectType: ProjectType;
-  overheadPerHour: number;   // $/hr
-  targetMarginPct: number;   // 0..1
-  startMonthISO: string;     // YYYY-MM
-  memberIds: string[];       // references roster
-  months: MonthRow[];
-  updatedAt: number;
-}
-
-export interface TotalsResult {
-  totalHours: number;
-  laborCost: number;
-  overheadCost: number;
-  expenses: number;
-  allIn: number;    // labor + overhead + expenses
-  revenue: number;  // sum(month.revenue)
-  profit: number;   // revenue - allIn
-  margin: number;   // profit / revenue (0..1)
-}
+import {
+  PersonType,
+  FTCompMode,
+  ProjectType,
+  Department,
+  RosterPerson,
+  MonthRow,
+  Project,
+  TotalsResult,
+} from "@/lib/types";
 
 /** ===================== Constants & Small Helpers ===================== */
 

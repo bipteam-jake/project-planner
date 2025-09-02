@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id               String   @id
+  name             String
+  description      String
+  status           String
+  projectType      String
+  overheadPerHour  Float
+  targetMarginPct  Float
+  startMonthISO    String
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  months  Month[]
+  members ProjectMember[]
+}
+
+model RosterPerson {
+  id               String  @id
+  name             String
+  personType       String
+  department       String
+  compMode         String?
+  monthlySalary    Int?
+  annualSalary     Int?
+  hourlyRate       Float?
+  baseMonthlyHours Int
+
+  // Relations
+  memberOf  ProjectMember[]
+  allocations Allocation[]
+}
+
+model ProjectMember {
+  projectId String
+  personId  String
+
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  person  RosterPerson @relation(fields: [personId], references: [id])
+
+  @@id([projectId, personId])
+  @@index([personId])
+}
+
+model Month {
+  id        String @id
+  projectId String
+  index     Int
+  label     String
+  expenses  Int
+  revenue   Int
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  allocations Allocation[]
+
+  @@unique([projectId, index])
+  @@index([projectId])
+}
+
+model Allocation {
+  id           String @id
+  monthId      String
+  personId     String
+  allocationPct Int
+
+  month  Month        @relation(fields: [monthId], references: [id], onDelete: Cascade)
+  person RosterPerson @relation(fields: [personId], references: [id])
+
+  @@unique([monthId, personId])
+  @@index([monthId])
+  @@index([personId])
+}

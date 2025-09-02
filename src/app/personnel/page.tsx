@@ -5,16 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  RosterPerson,
-  PersonType,
-  Department,
-  FTCompMode,
-  isFullTimeLike,
-  toNumber,
-} from "@/lib/storage";
+import { RosterPerson, PersonType, Department, FTCompMode } from "@/lib/types";
+import { isFullTimeLike, toNumber } from "@/lib/storage";
 
-import { localStorageRepo as repo } from "@/lib/repo";
+import { apiRepoAsync as repo } from "@/lib/repo";
 
 
 export default function PersonnelPage() {
@@ -23,16 +17,42 @@ export default function PersonnelPage() {
   const [typeFilter, setTypeFilter] = useState<"All" | PersonType>("All");
   const [departmentFilter, setDepartmentFilter] = useState<"All" | Department>("All");
   const [hydrated, setHydrated] = useState(false);
+  const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
 
   // Load roster on mount
   useEffect(() => {
-    setRoster(repo.loadRoster());
-    setHydrated(true);
+    let mounted = true;
+    (async () => {
+      try {
+        const rs = await repo.loadRoster();
+        if (!mounted) return;
+        setRoster(rs);
+        setHydrated(true);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Autosave only after initial load
+  // Debounced autosave (bulk) for roster edits to reduce network chatter
   useEffect(() => {
-    if (hydrated) repo.saveRoster(roster);
+    if (!hydrated) return;
+    setSaving("saving");
+    const t = setTimeout(async () => {
+      try {
+        await repo.saveRoster(roster);
+        setSaving("saved");
+        setTimeout(() => setSaving("idle"), 800);
+      } catch (e) {
+        console.error(e);
+        setSaving("idle");
+      }
+    }, 600);
+    return () => clearTimeout(t);
   }, [roster, hydrated]);
 
   const filtered = useMemo(() => {
@@ -46,34 +66,47 @@ export default function PersonnelPage() {
   }, [roster, search, typeFilter, departmentFilter]);
 
   function addPerson() {
-    setRoster((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        name: "New Person",
-        personType: "Full-Time",
-        department: "Other",
-        compMode: "monthly",
-        monthlySalary: 8000,
-        annualSalary: 0,
-        hourlyRate: 0,
-        baseMonthlyHours: 160,
-      },
-    ]);
+    const newPerson: RosterPerson = {
+      id: crypto.randomUUID(),
+      name: "New Person",
+      personType: "Full-Time",
+      department: "Other",
+      compMode: "monthly",
+      monthlySalary: 8000,
+      annualSalary: 0,
+      hourlyRate: 0,
+      baseMonthlyHours: 160,
+    };
+    setRoster((prev) => [...prev, newPerson]);
+    void repo.createPerson(newPerson);
   }
 
   function update(id: string, patch: Partial<RosterPerson>) {
-    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    setRoster((prev) => {
+      const next = prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      const person = next.find((r) => r.id === id);
+      if (person) {
+        void repo.upsertPerson(person);
+      }
+      return next;
+    });
   }
 
   function remove(id: string) {
     if (!confirm("Remove this person from the company roster?")) return;
     setRoster((prev) => prev.filter((r) => r.id !== id));
+    void repo.deletePerson(id);
   }
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Personnel</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Personnel</h1>
+        <div className="text-xs text-muted-foreground h-5 flex items-center">
+          {saving === "saving" && <span>Saving…</span>}
+          {saving === "saved" && <span>Saved</span>}
+        </div>
+      </div>
 
       {/* Search + filter + add */}
       <div className="flex flex-col md:flex-row gap-2 md:items-center md:justify-between">
