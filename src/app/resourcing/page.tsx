@@ -6,18 +6,11 @@ import Link from "next/link";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  currency,
-  Project,
-  ProjectType,
-  RosterPerson,
-  Department,
-  toNumber,
-  effectiveHourlyRate,
-} from "@/lib/storage";
+import { Project, ProjectType, RosterPerson, Department } from "@/lib/types";
+import { currency, toNumber, effectiveHourlyRate } from "@/lib/storage";
 
 // ⬇️ NEW: use the repo abstraction (can later swap to `apiRepo`)
-import { localStorageRepo as repo } from "@/lib/repo";
+import { apiRepoAsync as repo } from "@/lib/repo";
 
 /* ---------------- helpers shared by dashboard ---------------- */
 
@@ -233,15 +226,27 @@ export default function ResourcingPage() {
   // UI state for showing costs in heatmap
   const [showCosts, setShowCosts] = useState(false);
 
-  useEffect(() => {
-    // ⬇️ repo-backed (can later swap to API by changing the import only)
-    const ps = repo.loadProjects();
-    const rs = repo.loadRoster();
-    setProjects(ps);
-    setRoster(rs);
-    setSelectedProjects(new Set(ps.map((p) => p.id))); // default: all projects
-    setSelectedPeople(new Set(rs.map((r) => r.id))); // default: all people
-    setHydrated(true);
+    useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [ps, rs] = await Promise.all([
+          repo.loadProjects(),
+          repo.loadRoster(),
+        ]);
+        if (!mounted) return;
+        setProjects(ps);
+        setRoster(rs);
+        setSelectedProjects(new Set(ps.map((p) => p.id))); // default: all projects
+        setSelectedPeople(new Set(rs.map((r) => r.id))); // default: all people
+        setHydrated(true);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const filteredProjects = useMemo(() => {
@@ -710,3 +715,4 @@ export default function ResourcingPage() {
     </div>
   );
 }
+

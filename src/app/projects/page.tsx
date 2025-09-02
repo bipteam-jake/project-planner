@@ -6,17 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Project, RosterPerson, ProjectType } from "@/lib/storage";
-import {
-  currency,
-  computeProjectTotals,
-  createProject,
+import { Project, RosterPerson, ProjectType } from "@/lib/types";
+import { currency, computeProjectTotals, createProject, upsertProject } from "@/lib/storage";
 
-  saveProjects,
-  upsertProject,
-} from "@/lib/storage";
-
-import { localStorageRepo as repo } from "@/lib/repo";
+import { apiRepoAsync as repo } from "@/lib/repo";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -51,22 +44,34 @@ export default function ProjectsPage() {
   }
 
   useEffect(() => {
-    setProjects(repo.loadProjects());
-    setRoster(repo.loadRoster());
-    setHydrated(true);
+    let mounted = true;
+    (async () => {
+      try {
+        const [ps, rs] = await Promise.all([
+          repo.loadProjects(),
+          repo.loadRoster(),
+        ]);
+        if (!mounted) return;
+        setProjects(ps);
+        setRoster(rs);
+        setHydrated(true);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Autosave only after initial load
-  useEffect(() => {
-    if (hydrated) repo.saveProjects(projects);
-  }, [projects, hydrated]);
+  // No autosave here; we call incremental endpoints on actions
 
   function addProject(): void {
     setProjects((prev) => {
       const created = createProject({ name: `Project ${prev.length + 1}` });
       const next = upsertProject(created, prev);
-      // Immediate persist so /projects/[id] can see it even if navigated ASAP
-      saveProjects(next);
+      // Persist as create
+      void repo.createProject(created);
       return next;
     });
   }
@@ -75,7 +80,7 @@ export default function ProjectsPage() {
     if (!confirm("Delete this project?")) return;
     setProjects((prev) => {
       const next = prev.filter((p) => p.id !== id);
-      saveProjects(next);
+      void repo.deleteProject(id);
       return next;
     });
   }
@@ -91,7 +96,7 @@ export default function ProjectsPage() {
         updatedAt: Date.now(),
       };
       const next = upsertProject(copy, prev);
-      saveProjects(next);
+      void repo.createProject(copy);
       return next;
     });
   }

@@ -1,16 +1,14 @@
 // /src/app/projects/[id]/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Trash2 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
+import { Project, RosterPerson, MonthRow, ProjectType, TotalsResult } from "@/lib/types";
 import {
-  Project,
-  RosterPerson,
-  MonthRow,
-  ProjectType,
   upsertProject,
   labelFromISO,
   computeProjectTotals,
@@ -20,10 +18,9 @@ import {
   clamp,
   toNumber,
   effectiveHourlyRate,
-  TotalsResult,
 } from "@/lib/storage";
 
-import { localStorageRepo as repo } from "@/lib/repo";
+import { apiRepoAsync as repo } from "@/lib/repo";
 
 
 /** Helpers for month math & colors (consistent with dashboard) */
@@ -51,6 +48,8 @@ export default function ProjectDetailsPage() {
   const [hydrated, setHydrated] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [roster, setRoster] = useState<RosterPerson[]>([]);
+  const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Modal state for adding personnel
   const [showAddModal, setShowAddModal] = useState(false);
@@ -59,15 +58,44 @@ export default function ProjectDetailsPage() {
 
   // Load once, then mark hydrated
   useEffect(() => {
-    setProjects(repo.loadProjects());
-    setRoster(repo.loadRoster());
-    setHydrated(true);
+    let mounted = true;
+    (async () => {
+      try {
+        const [ps, rs] = await Promise.all([
+          repo.loadProjects(),
+          repo.loadRoster(),
+        ]);
+        if (!mounted) return;
+        setProjects(ps);
+        setRoster(rs);
+        setHydrated(true);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Autosave projects (guarded)
+  // Debounced save of the current project only
   useEffect(() => {
-    if (hydrated) repo.saveProjects(projects);
-  }, [projects, hydrated]);
+    if (!hydrated) return;
+    const p = projects.find((x) => x.id === projectId);
+    if (!p) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaving("saving");
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await repo.upsertProject(p);
+        setSaving("saved");
+        setTimeout(() => setSaving("idle"), 800);
+      } catch (e) {
+        console.error(e);
+        setSaving("idle");
+      }
+    }, 600);
+  }, [projects, hydrated, projectId]);
 
   // Derive current project
   const project = useMemo(
@@ -148,6 +176,17 @@ export default function ProjectDetailsPage() {
         m.id === monthId ? { ...m, revenue: toNumber(value) } : m
       ),
     }));
+  }
+
+  // Remove a month and re-label remaining months to stay aligned with startMonthISO
+  function removeMonth(monthId: string) {
+    if (!confirm("Remove this month?")) return;
+    updateProject((prev) => {
+      const nextMonths = prev.months
+        .filter((m) => m.id !== monthId)
+        .map((m, i) => ({ ...m, label: labelFromISO(prev.startMonthISO, i) }));
+      return { ...prev, months: nextMonths };
+    });
   }
 
   // Remove a member from project + allocations
@@ -390,13 +429,23 @@ export default function ProjectDetailsPage() {
             <div key={m.id} className="rounded-lg border p-3 space-y-2">
               <div className="grid grid-cols-12 gap-2 items-center">
                 <div className="col-span-3 font-medium">{m.label}</div>
-                <div className="col-span-9 text-right text-sm text-muted-foreground">
+                <div className="col-span-8 text-right text-sm text-muted-foreground">
                   Overhead: {currency(stats.overhead)} · Expenses:{" "}
                   {currency(m.expenses)} · Revenue: {currency(m.revenue)} ·
                   Labor: {currency(stats.labor)} · All-in:{" "}
                   {currency(stats.allIn)}
                 </div>
-              </div>
+				<div className="col-span-1 flex justify-end">
+					<Button
+						variant="outline"
+						size="sm"
+						title="Remove month"
+						onClick={() => removeMonth(m.id)}
+					>
+						<Trash2 className="h-4 w-4" />
+					</Button>
+				</div>
+                </div>
 
               {members.map((p) => {
                 const alloc = m.personAllocations[p.id] ?? 0; // 0..100 on THIS project
@@ -587,3 +636,5 @@ function Modal({
     </div>
   );
 }
+
+

@@ -1,5 +1,5 @@
 // src/lib/repo.ts
-import { Project, RosterPerson, ProjectType, Department } from "@/lib/storage";
+import { Project, RosterPerson, ProjectType, Department } from "@/lib/types";
 
 /**
  * Stable keys. Update these ONLY if you also migrate existing data.
@@ -127,5 +127,128 @@ export const localStorageRepo: Repo = {
   },
   saveRoster(r: RosterPerson[]): void {
     writeJSON(ROSTER_KEY, r);
+  },
+};
+
+// Async API-backed repo for better UX
+export interface AsyncRepo {
+  loadProjects(): Promise<Project[]>;
+  saveProjects(p: Project[]): Promise<void>;
+  loadRoster(): Promise<RosterPerson[]>;
+  saveRoster(r: RosterPerson[]): Promise<void>;
+  // incremental
+  createProject(p: Project): Promise<void>;
+  upsertProject(p: Project): Promise<void>;
+  deleteProject(id: string): Promise<void>;
+  createPerson(p: RosterPerson): Promise<void>;
+  upsertPerson(p: RosterPerson): Promise<void>;
+  deletePerson(id: string): Promise<void>;
+}
+
+export const apiRepoAsync: AsyncRepo = {
+  async loadProjects(): Promise<Project[]> {
+    const res = await fetch("/api/projects", { cache: "no-store" });
+    if (!res.ok) throw new Error("Failed to load projects");
+    const data = (await res.json()) as Project[];
+    if (Array.isArray(data) && data.length === 0 && process.env.NODE_ENV !== "production") {
+      // One-time client-side bootstrap from localStorage if present
+      try {
+        const ls = window.localStorage.getItem("quote_estimator.projects.v1");
+        if (ls) {
+          const fromLs = JSON.parse(ls) as Project[];
+          if (Array.isArray(fromLs) && fromLs.length > 0) {
+            const put = await fetch("/api/projects", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(fromLs),
+            });
+            if (put.ok) return fromLs;
+          }
+        }
+      } catch {}
+    }
+    return data;
+  },
+  async saveProjects(p: Project[]): Promise<void> {
+    const res = await fetch("/api/projects", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(p),
+    });
+    if (!res.ok) throw new Error("Failed to save projects");
+  },
+  async loadRoster(): Promise<RosterPerson[]> {
+    const res = await fetch("/api/roster", { cache: "no-store" });
+    if (!res.ok) throw new Error("Failed to load roster");
+    const data = (await res.json()) as RosterPerson[];
+    if (Array.isArray(data) && data.length === 0 && process.env.NODE_ENV !== "production") {
+      try {
+        const ls = window.localStorage.getItem("quote_estimator.roster.v2");
+        if (ls) {
+          const fromLs = JSON.parse(ls) as RosterPerson[];
+          if (Array.isArray(fromLs) && fromLs.length > 0) {
+            const put = await fetch("/api/roster", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(fromLs),
+            });
+            if (put.ok) return fromLs;
+          }
+        }
+      } catch {}
+    }
+    return data;
+  },
+  async saveRoster(r: RosterPerson[]): Promise<void> {
+    const res = await fetch("/api/roster", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(r),
+    });
+    if (!res.ok) throw new Error("Failed to save roster");
+  },
+  async createProject(p: Project): Promise<void> {
+    const res = await fetch(`/api/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(p),
+    });
+    if (!res.ok) throw new Error("Failed to create project");
+  },
+  async upsertProject(p: Project): Promise<void> {
+    const res = await fetch(`/api/projects/${encodeURIComponent(p.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(p),
+    });
+    if (!res.ok) throw new Error("Failed to upsert project");
+  },
+  async deleteProject(id: string): Promise<void> {
+    const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete project");
+  },
+  async createPerson(p: RosterPerson): Promise<void> {
+    const res = await fetch(`/api/roster`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(p),
+    });
+    if (!res.ok) throw new Error("Failed to create person");
+  },
+  async upsertPerson(p: RosterPerson): Promise<void> {
+    const res = await fetch(`/api/roster/${encodeURIComponent(p.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(p),
+    });
+    if (!res.ok) throw new Error("Failed to upsert person");
+  },
+  async deletePerson(id: string): Promise<void> {
+    const res = await fetch(`/api/roster/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete person");
   },
 };

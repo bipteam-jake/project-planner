@@ -1,0 +1,5 @@
+                  Overhead: {currency(stats.overhead)} · Expenses:{" "}
+                  {currency(m.expenses)} · Revenue: {currency(m.revenue)} ·
+                  Labor: {currency(stats.labor)} · All-in:{" "}
+                  {currency(stats.allIn)}
+                </div>

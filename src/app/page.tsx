@@ -5,18 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  currency,
-  Project,
-  ProjectType,
-  RosterPerson,
-  Department,
-  toNumber,
-  effectiveHourlyRate,
-} from "@/lib/storage";
+import { Project, ProjectType, RosterPerson, Department } from "@/lib/types";
+import { currency, toNumber, effectiveHourlyRate } from "@/lib/storage";
 
 // ⬇️ NEW: use the repo abstraction (can later swap to `apiRepo`)
-import { localStorageRepo as repo } from "@/lib/repo";
+import { apiRepoAsync as repo } from "@/lib/repo";
 
 import {
   BarChart,
@@ -338,14 +331,26 @@ export default function DashboardPage() {
   // UI state for collapsible filters section
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
 
-  useEffect(() => {
-    // ⬇️ repo-backed (can later swap to API by changing the import only)
-    const ps = repo.loadProjects();
-    const rs = repo.loadRoster();
-    setProjects(ps);
-    setRoster(rs);
-    setSelectedProjects(new Set(ps.map((p) => p.id))); // default: all projects
-    setHydrated(true);
+    useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [ps, rs] = await Promise.all([
+          repo.loadProjects(),
+          repo.loadRoster(),
+        ]);
+        if (!mounted) return;
+        setProjects(ps);
+        setRoster(rs);
+        setSelectedProjects(new Set(ps.map((p) => p.id)));
+        setHydrated(true);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const filteredProjects = useMemo(() => {
@@ -831,3 +836,4 @@ function Tile({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
