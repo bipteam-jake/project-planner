@@ -40,6 +40,8 @@ export async function PUT(
         annualSalary: r.annualSalary != null ? Number(r.annualSalary) : null,
         hourlyRate: r.hourlyRate != null ? Number(r.hourlyRate) : null,
         baseMonthlyHours: Number(r.baseMonthlyHours ?? 160),
+        isActive: r.isActive ?? true,
+        inactiveDate: r.inactiveDate ?? null,
       },
     });
     return NextResponse.json({ ok: true }, { status: 200 });

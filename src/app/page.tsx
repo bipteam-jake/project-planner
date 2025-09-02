@@ -1,11 +1,11 @@
 // /src/app/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { ChevronDown, ChevronUp, Check, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Project, ProjectType, RosterPerson, Department } from "@/lib/types";
+import { Project, ProjectStatus, RosterPerson, Department } from "@/lib/types";
 import { currency, toNumber, effectiveHourlyRate } from "@/lib/storage";
 
 // ⬇️ NEW: use the repo abstraction (can later swap to `apiRepo`)
@@ -291,7 +291,28 @@ function colorForUtil(util: number): string {
   return "bg-gray-200";
 }
 
-function UtilBadge({ util }: { util: number }) {
+// Helper to check if person is inactive in a given month
+function isPersonInactiveInMonth(person: RosterPerson, ym: string): boolean {
+  if (person.isActive !== false) return false; // Active person
+  if (!person.inactiveDate) return false; // No inactive date set
+  
+  // Convert ym (YYYY-MM) and inactiveDate (YYYY-MM-DD) to comparable format
+  const monthDate = `${ym}-01`;
+  return monthDate >= person.inactiveDate;
+}
+
+function UtilBadge({ util, person, ym }: { util: number; person?: RosterPerson; ym?: string }) {
+  // Check if person is inactive in this month
+  const isInactive = person && ym && isPersonInactiveInMonth(person, ym);
+  
+  if (isInactive) {
+    return (
+      <div className="rounded-md px-2 py-2 bg-gray-300 text-black/80 inline-flex items-center justify-center" title="Person inactive">
+        <span>N/A</span>
+      </div>
+    );
+  }
+  
   const pctDisplay = (util * 100).toFixed(0); // show real % (can exceed 100)
   const overBy = util > 1 ? ((util - 1) * 100).toFixed(0) : null;
   const cls = `rounded-md px-2 py-2 ${colorForUtil(util)} text-black/80 inline-flex items-center gap-1 justify-center`;
@@ -322,7 +343,7 @@ export default function DashboardPage() {
   const [startYm, setStartYm] = useState<string>("");
   const [endYm, setEndYm] = useState<string>("");
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
-  const [selectedProjectTypes, setSelectedProjectTypes] = useState<Set<ProjectType>>(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
+  const [selectedProjectStatuses, setSelectedProjectStatuses] = useState<Set<ProjectStatus>>(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
   const [selectedDepartments, setSelectedDepartments] = useState<Set<Department>>(new Set(["C-Suite", "BD", "Marketing", "Product", "Engineering", "Ops", "Software", "Admin", "Other"]));
 
   // UI state for expanded departments in heatmap
@@ -330,6 +351,21 @@ export default function DashboardPage() {
   
   // UI state for collapsible filters section
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
+
+  // Dropdown states for multi-select filters
+  const [projectStatusDropdownOpen, setProjectStatusDropdownOpen] = useState(false);
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const [departmentDropdownOpen, setDepartmentDropdownOpen] = useState(false);
+
+  // Search states for dropdowns
+  const [projectStatusSearch, setProjectStatusSearch] = useState("");
+  const [projectSearch, setProjectSearch] = useState("");
+  const [departmentSearch, setDepartmentSearch] = useState("");
+
+  // Refs for dropdown click-outside handling
+  const projectStatusDropdownRef = useRef<HTMLDivElement>(null);
+  const projectDropdownRef = useRef<HTMLDivElement>(null);
+  const departmentDropdownRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
     let mounted = true;
@@ -353,12 +389,53 @@ export default function DashboardPage() {
     };
   }, []);
 
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (projectStatusDropdownRef.current && !projectStatusDropdownRef.current.contains(event.target as Node)) {
+        setProjectStatusDropdownOpen(false);
+      }
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(event.target as Node)) {
+        setProjectDropdownOpen(false);
+      }
+      if (departmentDropdownRef.current && !departmentDropdownRef.current.contains(event.target as Node)) {
+        setDepartmentDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const filteredProjects = useMemo(() => {
     if (selectedProjects.size === 0) return [];
     return projects.filter((p) => 
-      selectedProjects.has(p.id) && selectedProjectTypes.has(p.projectType)
+      selectedProjects.has(p.id) && selectedProjectStatuses.has(p.projectStatus)
     );
-  }, [projects, selectedProjects, selectedProjectTypes]);
+  }, [projects, selectedProjects, selectedProjectStatuses]);
+
+  // Filtered lists for dropdown searches
+  const filteredProjectStatusesForSearch = useMemo(() => {
+    const allStatuses = ["Test", "BD", "Active", "Completed", "Cancelled"] as const;
+    if (!projectStatusSearch.trim()) return allStatuses;
+    const search = projectStatusSearch.toLowerCase();
+    return allStatuses.filter(status => status.toLowerCase().includes(search));
+  }, [projectStatusSearch]);
+
+  const filteredProjectsForSearch = useMemo(() => {
+    if (!projectSearch.trim()) return projects;
+    const search = projectSearch.toLowerCase();
+    return projects.filter(p => 
+      p.name.toLowerCase().includes(search) || 
+      p.projectStatus.toLowerCase().includes(search)
+    );
+  }, [projects, projectSearch]);
+
+  const filteredDepartmentsForSearch = useMemo(() => {
+    const allDepartments = ["C-Suite", "BD", "Marketing", "Product", "Engineering", "Ops", "Software", "Admin", "Other"] as const;
+    if (!departmentSearch.trim()) return allDepartments;
+    const search = departmentSearch.toLowerCase();
+    return allDepartments.filter(dept => dept.toLowerCase().includes(search));
+  }, [departmentSearch]);
 
   // No longer need filteredPeople since we're grouping by department
 
@@ -436,19 +513,19 @@ export default function DashboardPage() {
 
 
   // Project type selection helpers
-  function toggleProjectType(type: ProjectType, on: boolean) {
-    setSelectedProjectTypes((prev) => {
+  function toggleProjectStatus(status: ProjectStatus, on: boolean) {
+    setSelectedProjectStatuses((prev) => {
       const next = new Set(prev);
-      if (on) next.add(type);
-      else next.delete(type);
+      if (on) next.add(status);
+      else next.delete(status);
       return next;
     });
   }
-  function selectAllProjectTypes() {
-    setSelectedProjectTypes(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
+  function selectAllProjectStatuses() {
+    setSelectedProjectStatuses(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
   }
-  function clearProjectTypes() {
-    setSelectedProjectTypes(new Set());
+  function clearProjectStatuses() {
+    setSelectedProjectStatuses(new Set());
   }
 
   // Department selection helpers
@@ -481,178 +558,305 @@ export default function DashboardPage() {
     return <div className="text-sm text-muted-foreground">Loading…</div>;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+    <div className="space-y-8">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <p className="text-muted-foreground">
+          Overview of project finances, utilization, and team performance
+        </p>
+      </div>
 
       {/* Filters */}
-      <div className="rounded-xl border space-y-4">
-        {/* Filters Header */}
-        <div 
-          className="flex items-center justify-between p-4 pb-2 cursor-pointer hover:bg-muted/50"
-          onClick={() => setFiltersCollapsed(!filtersCollapsed)}
-        >
-          <h2 className="text-lg font-semibold">Filters</h2>
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-            {filtersCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-          </Button>
-        </div>
-        
-        {/* Collapsible Filters Content */}
-        <div className={`px-4 pb-4 space-y-4 transition-all duration-300 ease-in-out overflow-hidden ${filtersCollapsed ? "max-h-0 opacity-0 pb-0" : "max-h-[2000px] opacity-100"}`}>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="rounded-xl border bg-card shadow-sm p-4 space-y-4">
+        {/* Date Range Filters */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <div className="text-sm font-medium mb-1">Start month</div>
+            <label className="text-sm font-medium text-muted-foreground">Start month</label>
             <Input
               type="month"
               value={startYm}
               onChange={(e) => setStartYm(e.target.value)}
+              className="mt-1"
             />
           </div>
           <div>
-            <div className="text-sm font-medium mb-1">End month</div>
+            <label className="text-sm font-medium text-muted-foreground">End month</label>
             <Input
               type="month"
               value={endYm}
               onChange={(e) => setEndYm(e.target.value)}
+              className="mt-1"
             />
           </div>
-          <div className="flex items-end gap-2">
-            <Button variant="outline" onClick={selectAllProjects}>
-              Select all projects
-            </Button>
-            <Button variant="outline" onClick={clearProjects}>
-              Clear
-            </Button>
-          </div>
         </div>
 
-        {/* Project Type multi-select */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-medium">Project Types</div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={selectAllProjectTypes}>
-                Select all
-              </Button>
-              <Button variant="outline" onClick={clearProjectTypes}>
-                Clear
-              </Button>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {(["Test", "BD", "Active", "Completed", "Cancelled"] as const).map((type) => {
-              const checked = selectedProjectTypes.has(type);
-              return (
-                <label
-                  key={type}
-                  className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${
-                    checked ? "bg-secondary" : "bg-background"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(e) => toggleProjectType(type, e.target.checked)}
-                  />
-                  <span className="truncate">{type}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Project multi-select */}
-        <div className="space-y-2">
-          <div className="text-sm font-medium">Projects</div>
-          {projects.length === 0 ? (
-            <div className="text-sm text-muted-foreground">
-              No projects yet. Create one on the Projects page.
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {projects.map((p) => {
-                const checked = selectedProjects.has(p.id);
-                const typeMatch = selectedProjectTypes.has(p.projectType);
-                const isActive = checked && typeMatch;
-                return (
-                  <label
-                    key={p.id}
-                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm transition-opacity ${
-                      isActive ? "bg-secondary" : 
-                      typeMatch ? "bg-background" : "bg-background opacity-40"
-                    }`}
-                    title={!typeMatch ? `${p.projectType} type is not selected` : ""}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={!typeMatch}
-                      onChange={(e) => toggleProject(p.id, e.target.checked)}
+        {/* Multi-select Dropdowns */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Project Status */}
+          <div className="relative" ref={projectStatusDropdownRef}>
+            <label className="text-sm font-medium text-muted-foreground">Project Status</label>
+            <button
+              onClick={() => setProjectStatusDropdownOpen(!projectStatusDropdownOpen)}
+              className="mt-1 flex items-center gap-2 border rounded-lg px-3 py-2 bg-background text-sm w-full justify-between hover:bg-muted transition-colors"
+            >
+              <span>
+                {selectedProjectStatuses.size === 5 
+                  ? "All Statuses"
+                  : selectedProjectStatuses.size === 0
+                  ? "No Statuses"
+                  : `${selectedProjectStatuses.size} selected`
+                }
+              </span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${projectStatusDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {projectStatusDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-full bg-background border rounded-lg shadow-lg z-10 py-1">
+                <div className="px-3 py-2 border-b">
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      onClick={selectAllProjectStatuses}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Select all
+                    </button>
+                    <span className="text-xs text-muted-foreground">•</span>
+                    <button
+                      onClick={clearProjectStatuses}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Search className="h-3 w-3 absolute left-2 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search statuses..."
+                      value={projectStatusSearch}
+                      onChange={(e) => setProjectStatusSearch(e.target.value)}
+                      className="pl-7 h-7 text-xs"
                     />
-                    <span className={`truncate ${!typeMatch ? "line-through text-muted-foreground" : ""}`}>
-                      {p.name} <span className="text-xs text-muted-foreground">({p.projectType})</span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Department multi-select */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-medium">Departments</div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={selectAllDepartments}>
-                Select all
-              </Button>
-              <Button variant="outline" onClick={clearDepartments}>
-                Clear
-              </Button>
-            </div>
+                  </div>
+                </div>
+                <div className="max-h-40 overflow-y-auto">
+                  {filteredProjectStatusesForSearch.map((status) => {
+                    const checked = selectedProjectStatuses.has(status);
+                    return (
+                      <label
+                        key={status}
+                        className="flex items-center gap-2 px-3 py-2 hover:bg-muted cursor-pointer text-sm"
+                      >
+                        <div className="relative flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => toggleProjectStatus(status, e.target.checked)}
+                            className="sr-only"
+                          />
+                          <div className={`w-4 h-4 border rounded flex items-center justify-center ${
+                            checked ? 'bg-primary border-primary' : 'border-input'
+                          }`}>
+                            {checked && <Check className="h-3 w-3 text-primary-foreground" />}
+                          </div>
+                        </div>
+                        {status}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {(["C-Suite", "BD", "Marketing", "Product", "Engineering", "Ops", "Software", "Admin", "Other"] as const).map((department) => {
-              const checked = selectedDepartments.has(department);
-              return (
-                <label
-                  key={department}
-                  className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm ${
-                    checked ? "bg-secondary" : "bg-background"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(e) => toggleDepartment(department, e.target.checked)}
-                  />
-                  <span className="truncate">{department}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
 
+          {/* Projects */}
+          <div className="relative" ref={projectDropdownRef}>
+            <label className="text-sm font-medium text-muted-foreground">Projects</label>
+            <button
+              onClick={() => setProjectDropdownOpen(!projectDropdownOpen)}
+              className="mt-1 flex items-center gap-2 border rounded-lg px-3 py-2 bg-background text-sm w-full justify-between hover:bg-muted transition-colors"
+            >
+              <span>
+                {projects.length === 0
+                  ? "No Projects"
+                  : selectedProjects.size === projects.length
+                  ? "All Projects"
+                  : selectedProjects.size === 0
+                  ? "No Projects"
+                  : `${selectedProjects.size} selected`
+                }
+              </span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${projectDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {projectDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-full bg-background border rounded-lg shadow-lg z-10 py-1">
+                <div className="px-3 py-2 border-b">
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      onClick={selectAllProjects}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Select all
+                    </button>
+                    <span className="text-xs text-muted-foreground">•</span>
+                    <button
+                      onClick={clearProjects}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Search className="h-3 w-3 absolute left-2 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search projects..."
+                      value={projectSearch}
+                      onChange={(e) => setProjectSearch(e.target.value)}
+                      className="pl-7 h-7 text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="max-h-40 overflow-y-auto">
+                  {projects.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      No projects yet. Create one on the Projects page.
+                    </div>
+                  ) : (
+                    filteredProjectsForSearch.map((p) => {
+                      const checked = selectedProjects.has(p.id);
+                      const statusMatch = selectedProjectStatuses.has(p.projectStatus);
+                      return (
+                        <label
+                          key={p.id}
+                          className={`flex items-center gap-2 px-3 py-2 hover:bg-muted cursor-pointer text-sm ${
+                            !statusMatch ? 'opacity-50' : ''
+                          }`}
+                          title={!statusMatch ? `${p.projectStatus} status is not selected` : ""}
+                        >
+                          <div className="relative flex items-center justify-center">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={!statusMatch}
+                              onChange={(e) => toggleProject(p.id, e.target.checked)}
+                              className="sr-only"
+                            />
+                            <div className={`w-4 h-4 border rounded flex items-center justify-center ${
+                              checked && statusMatch ? 'bg-primary border-primary' : 'border-input'
+                            }`}>
+                              {checked && statusMatch && <Check className="h-3 w-3 text-primary-foreground" />}
+                            </div>
+                          </div>
+                          <span className={`truncate ${!statusMatch ? 'line-through' : ''}`}>
+                            {p.name} <span className="text-xs text-muted-foreground">({p.projectStatus})</span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Departments */}
+          <div className="relative" ref={departmentDropdownRef}>
+            <label className="text-sm font-medium text-muted-foreground">Departments</label>
+            <button
+              onClick={() => setDepartmentDropdownOpen(!departmentDropdownOpen)}
+              className="mt-1 flex items-center gap-2 border rounded-lg px-3 py-2 bg-background text-sm w-full justify-between hover:bg-muted transition-colors"
+            >
+              <span>
+                {selectedDepartments.size === 9 
+                  ? "All Departments"
+                  : selectedDepartments.size === 0
+                  ? "No Departments"
+                  : `${selectedDepartments.size} selected`
+                }
+              </span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${departmentDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {departmentDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-full bg-background border rounded-lg shadow-lg z-10 py-1">
+                <div className="px-3 py-2 border-b">
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      onClick={selectAllDepartments}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Select all
+                    </button>
+                    <span className="text-xs text-muted-foreground">•</span>
+                    <button
+                      onClick={clearDepartments}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Search className="h-3 w-3 absolute left-2 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search departments..."
+                      value={departmentSearch}
+                      onChange={(e) => setDepartmentSearch(e.target.value)}
+                      className="pl-7 h-7 text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="max-h-40 overflow-y-auto">
+                  {filteredDepartmentsForSearch.map((department) => {
+                    const checked = selectedDepartments.has(department);
+                    return (
+                      <label
+                        key={department}
+                        className="flex items-center gap-2 px-3 py-2 hover:bg-muted cursor-pointer text-sm"
+                      >
+                        <div className="relative flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => toggleDepartment(department, e.target.checked)}
+                            className="sr-only"
+                          />
+                          <div className={`w-4 h-4 border rounded flex items-center justify-center ${
+                            checked ? 'bg-primary border-primary' : 'border-input'
+                          }`}>
+                            {checked && <Check className="h-3 w-3 text-primary-foreground" />}
+                          </div>
+                        </div>
+                        {department}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Summary tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
         <Tile label="Hours" value={summary.hours.toFixed(1)} />
         <Tile label="Labor cost" value={currency(summary.labor)} />
         <Tile label="Overhead cost" value={currency(summary.overhead)} />
         <Tile label="Expenses" value={currency(summary.expenses)} />
         <Tile label="All-in cost" value={currency(summary.allIn)} />
         <Tile label="Revenue" value={currency(summary.revenue)} />
-        <Tile label="Margin %" value={`${(summary.margin * 100).toFixed(1)}%`} />
+        <Tile 
+          label="Margin" 
+          value={`${(summary.margin * 100).toFixed(1)}%`}
+          subValue={currency(summary.profit)}
+        />
       </div>
 
       {/* Stacked Bar: monthly costs + revenue line */}
-      <div className="rounded-xl border p-4">
-        <div className="text-sm font-semibold mb-2">
-          Monthly Costs (Labor, Overhead, Expenses) vs Revenue
-        </div>
+      <div className="rounded-xl border bg-card shadow-sm p-6">
+        <h3 className="text-lg font-semibold mb-4">
+          Monthly Costs vs Revenue
+        </h3>
         <div style={{ width: "100%", height: 320 }}>
           <ResponsiveContainer>
             <BarChart data={rolled}>
@@ -678,10 +882,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Cumulative: Revenue vs All-in */}
-      <div className="rounded-xl border p-4">
-        <div className="text-sm font-semibold mb-2">
-          Cumulative Revenue vs All-in
-        </div>
+      <div className="rounded-xl border bg-card shadow-sm p-6">
+        <h3 className="text-lg font-semibold mb-4">
+          Cumulative Revenue vs All-in Cost
+        </h3>
         <div style={{ width: "100%", height: 320 }}>
           <ResponsiveContainer>
             <LineChart
@@ -716,8 +920,8 @@ export default function DashboardPage() {
       </div>
 
       {/* Utilization Heatmap (expandable per person → per project) */}
-      <div className="rounded-xl border p-4 space-y-3">
-        <div className="text-sm font-semibold">Department Utilization</div>
+      <div className="rounded-xl border bg-card shadow-sm p-6 space-y-4">
+        <h3 className="text-lg font-semibold">Department Utilization</h3>
 
         {heat.months.length === 0 || heat.rows.length === 0 ? (
           <div className="text-sm text-muted-foreground">
@@ -773,7 +977,7 @@ export default function DashboardPage() {
                       </div>
                       {total.cells.map((c) => (
                         <div key={c.ym} className="p-2 text-xs text-center">
-                          <UtilBadge util={c.util} />
+                          <UtilBadge util={c.util} ym={c.ym} />
                         </div>
                       ))}
                     </div>
@@ -799,7 +1003,7 @@ export default function DashboardPage() {
                           </div>
                           {row.cells.map((c) => (
                             <div key={c.ym} className="p-2 text-xs text-center">
-                              <UtilBadge util={c.util} />
+                              <UtilBadge util={c.util} ym={c.ym} />
                             </div>
                           ))}
                         </div>
@@ -826,13 +1030,16 @@ export default function DashboardPage() {
 
 /* ----------------------------- small presentational ----------------------------- */
 
-function Tile({ label, value }: { label: string; value: string }) {
+function Tile({ label, value, subValue }: { label: string; value: string; subValue?: string }) {
   return (
-    <div className="rounded-2xl border p-4 bg-background">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-xl border bg-card shadow-sm p-4">
+      <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
-      <div className="text-2xl font-semibold">{value}</div>
+      <div className="text-2xl font-bold tracking-tight mt-2">{value}</div>
+      {subValue && (
+        <div className="text-sm text-muted-foreground mt-1">{subValue}</div>
+      )}
     </div>
   );
 }

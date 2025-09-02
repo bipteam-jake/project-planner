@@ -12,7 +12,7 @@ model Project {
   name             String
   description      String
   status           String
-  projectType      String
+  projectStatus    String  @default("Active")
   overheadPerHour  Float
   targetMarginPct  Float
   startMonthISO    String
@@ -21,6 +21,7 @@ model Project {
   // Relations
   months  Month[]
   members ProjectMember[]
+  weeks   ProjectWeek[]
 }
 
 model RosterPerson {
@@ -33,10 +34,13 @@ model RosterPerson {
   annualSalary     Int?
   hourlyRate       Float?
   baseMonthlyHours Int
+  isActive         Boolean @default(true)
+  inactiveDate     String?
 
   // Relations
   memberOf  ProjectMember[]
   allocations Allocation[]
+  todoAssignees TodoAssignee[]
 }
 
 model ProjectMember {
@@ -77,4 +81,48 @@ model Allocation {
   @@unique([monthId, personId])
   @@index([monthId])
   @@index([personId])
+}
+
+// ---- ToDo board (DB-backed) ----
+model ProjectWeek {
+  id        String   @id
+  projectId String
+  weekKey   String   // YYYY-MM-DD (Monday)
+  bdNeeded  Boolean  @default(false)
+  bdNotes   String   @default("")
+
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  todos     Todo[]
+
+  @@unique([projectId, weekKey])
+  @@index([weekKey])
+}
+
+model Todo {
+  id            String  @id
+  projectWeekId String
+  text          String
+  dueDate       String?
+  done          Boolean @default(false)
+
+  projectWeek ProjectWeek @relation(fields: [projectWeekId], references: [id], onDelete: Cascade)
+  assignees   TodoAssignee[]
+}
+
+model TodoAssignee {
+  id       String @id
+  todoId   String
+  personId String
+
+  todo   Todo         @relation(fields: [todoId], references: [id], onDelete: Cascade)
+  person RosterPerson @relation(fields: [personId], references: [id])
+
+  @@unique([todoId, personId])
+  @@index([personId])
+}
+
+model ProjectWeekOrder {
+  id      String @id
+  weekKey String @unique
+  order   Json   // array of projectIds
 }

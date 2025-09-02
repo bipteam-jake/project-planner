@@ -16,6 +16,8 @@ export async function GET() {
       annualSalary: r.annualSalary ?? undefined,
       hourlyRate: r.hourlyRate ?? undefined,
       baseMonthlyHours: r.baseMonthlyHours,
+      isActive: r.isActive ?? true, // Default to active for existing records
+      inactiveDate: r.inactiveDate ?? undefined,
     }));
     return NextResponse.json(result, { status: 200 });
   } catch (e) {
@@ -29,7 +31,16 @@ export async function PUT(req: Request) {
     const body = await req.json();
     const parse = z.array(RosterPersonSchema).safeParse(body);
     if (!parse.success) {
-      return NextResponse.json({ error: "Invalid payload", issues: parse.error.issues }, { status: 400 });
+      console.error("Roster validation failed:", parse.error.issues);
+      return NextResponse.json({ 
+        error: "Invalid payload", 
+        issues: parse.error.issues,
+        receivedData: Array.isArray(body) ? body.map(item => ({ 
+          id: item?.id, 
+          isActive: item?.isActive, 
+          inactiveDate: item?.inactiveDate 
+        })) : 'Not an array'
+      }, { status: 400 });
     }
     const list = parse.data;
 
@@ -48,6 +59,8 @@ export async function PUT(req: Request) {
               annualSalary: r.annualSalary != null ? Number(r.annualSalary) : null,
               hourlyRate: r.hourlyRate != null ? Number(r.hourlyRate) : null,
               baseMonthlyHours: Number(r.baseMonthlyHours ?? 160),
+              isActive: r.isActive ?? true,
+              inactiveDate: r.inactiveDate ?? null,
             },
           });
         }
@@ -80,6 +93,8 @@ export async function POST(req: Request) {
         annualSalary: r.annualSalary != null ? Number(r.annualSalary) : null,
         hourlyRate: r.hourlyRate != null ? Number(r.hourlyRate) : null,
         baseMonthlyHours: Number(r.baseMonthlyHours ?? 160),
+        isActive: r.isActive ?? true,
+        inactiveDate: r.inactiveDate ?? null,
       },
     });
     return NextResponse.json({ ok: true }, { status: 201 });
