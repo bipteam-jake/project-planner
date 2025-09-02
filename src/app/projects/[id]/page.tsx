@@ -5,9 +5,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { Trash2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
-import { Project, RosterPerson, MonthRow, ProjectType, TotalsResult } from "@/lib/types";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  CartesianGrid,
+} from "recharts";
+import { Project, RosterPerson, MonthRow, ProjectStatus, TotalsResult } from "@/lib/types";
 import {
   upsertProject,
   labelFromISO,
@@ -31,6 +43,65 @@ function ymFromStartIndex(startISO: string, index: number): string {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   return `${yy}-${mm}`;
 }
+
+function labelFromYm(ym: string): string {
+  const [y, m] = ym.split("-").map((n) => Number(n));
+  return new Date(y, m - 1, 1).toLocaleString(undefined, {
+    month: "short",
+    year: "numeric",
+  });
+}
+
+type RollRow = {
+  ym: string;
+  label: string;
+  labor: number;
+  overhead: number;
+  expenses: number;
+  allIn: number;
+  revenue: number;
+  hours: number;
+};
+
+// Build rollup for a single project
+function buildProjectRollup(project: Project, roster: RosterPerson[]): RollRow[] {
+  const rows: RollRow[] = [];
+
+  for (let i = 0; i < project.months.length; i++) {
+    const m = project.months[i];
+    const ym = ymFromStartIndex(project.startMonthISO, i);
+
+    const members = roster.filter((r) => project.memberIds.includes(r.id));
+
+    let monthHours = 0;
+    let monthLabor = 0;
+    for (const person of members) {
+      const alloc = toNumber(m.personAllocations[person.id] ?? 0, 0);
+      if (alloc <= 0) continue;
+      const base = toNumber(person.baseMonthlyHours, 0);
+      const hours = (base * alloc) / 100;
+      const rate = effectiveHourlyRate(person);
+      monthHours += hours;
+      monthLabor += hours * rate;
+    }
+
+    const monthOverhead = monthHours * project.overheadPerHour;
+    const allIn = monthLabor + monthOverhead + m.expenses;
+
+    rows.push({
+      ym,
+      label: labelFromYm(ym),
+      labor: monthLabor,
+      overhead: monthOverhead,
+      expenses: m.expenses,
+      allIn,
+      revenue: m.revenue,
+      hours: monthHours,
+    });
+  }
+
+  return rows;
+}
 function colorForUtil(util: number): string {
   const pct = Math.min(util, 1.5); // cap color at 150%
   if (pct >= 1.01) return "bg-red-400";
@@ -38,6 +109,16 @@ function colorForUtil(util: number): string {
   if (pct >= 0.5) return "bg-green-400";
   if (pct >= 0.25) return "bg-green-200";
   return "bg-gray-200";
+}
+
+// Helper to check if person is inactive in a given month
+function isPersonInactiveInMonth(person: RosterPerson, ym: string): boolean {
+  if (person.isActive !== false) return false; // Active person
+  if (!person.inactiveDate) return false; // No inactive date set
+  
+  // Convert ym (YYYY-MM) and inactiveDate (YYYY-MM-DD) to comparable format
+  const monthDate = `${ym}-01`;
+  return monthDate >= person.inactiveDate;
 }
 
 export default function ProjectDetailsPage() {
@@ -55,6 +136,9 @@ export default function ProjectDetailsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [personSearch, setPersonSearch] = useState("");
   const [tempSelected, setTempSelected] = useState<Set<string>>(new Set());
+
+  // UI state for collapsible charts section
+  const [chartsCollapsed, setChartsCollapsed] = useState(true);
 
   // Load once, then mark hydrated
   useEffect(() => {
@@ -128,6 +212,23 @@ export default function ProjectDetailsPage() {
     }
     return computeProjectTotals(project, roster);
   }, [project, roster]);
+
+  // Chart data
+  const rolled = useMemo(() => {
+    if (!project) return [];
+    return buildProjectRollup(project, roster);
+  }, [project, roster]);
+
+  // Cumulative series (for the line chart)
+  const cumulative = useMemo(() => {
+    let cumRev = 0;
+    let cumAllIn = 0;
+    return rolled.map((r) => {
+      cumRev += r.revenue;
+      cumAllIn += r.allIn;
+      return { label: r.label, cumRevenue: cumRev, cumAllIn };
+    });
+  }, [rolled]);
 
   function addMonth() {
     updateProject((prev) => {
@@ -270,28 +371,35 @@ export default function ProjectDetailsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header + autosave hint */}
-      <div className="flex items-center gap-3">
-        <Input
-          className="text-xl font-semibold"
-          value={project.name}
-          onChange={(e) =>
-            updateProject((p) => ({ ...p, name: e.target.value }))
-          }
-        />
-        <div className="ml-auto text-sm text-muted-foreground">Auto-saved</div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <Input
+            className="text-3xl font-bold tracking-tight border-none p-0 shadow-none focus-visible:ring-0 bg-transparent"
+            value={project.name}
+            onChange={(e) =>
+              updateProject((p) => ({ ...p, name: e.target.value }))
+            }
+          />
+          <p className="text-muted-foreground">
+            Configure project settings, team assignments, and financial planning
+          </p>
+        </div>
+        <div className="text-sm text-muted-foreground">Auto-saved</div>
       </div>
 
       {/* Project Inputs */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="rounded-xl border bg-card shadow-sm p-6">
+        <h3 className="text-lg font-semibold mb-4">Project Settings</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="space-y-1">
-          <div className="text-sm font-medium">Project Type</div>
+          <div className="text-sm font-medium">Project Status</div>
           <select
             className="border rounded-md px-3 py-2 bg-background w-full"
-            value={project.projectType}
+            value={project.projectStatus}
             onChange={(e) =>
-              updateProject((p) => ({ ...p, projectType: e.target.value as ProjectType }))
+              updateProject((p) => ({ ...p, projectStatus: e.target.value as ProjectStatus }))
             }
           >
             <option value="Test">Test</option>
@@ -357,12 +465,13 @@ export default function ProjectDetailsPage() {
             step={0.01}
           />
         </div>
+        </div>
       </div>
 
       {/* Members — chips + Add Personnel modal trigger */}
-      <div className="space-y-2">
+      <div className="rounded-xl border bg-card shadow-sm p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium">Members</div>
+          <h3 className="text-lg font-semibold">Team Members</h3>
           <Button type="button" onClick={openAddPersonnel}>
             Add Personnel
           </Button>
@@ -375,33 +484,144 @@ export default function ProjectDetailsPage() {
               No members yet. Click “Add Personnel”.
             </span>
           )}
-          {members.map((m) => (
-            <span
-              key={m.id}
-              className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm"
-            >
-              {m.name}
-              <button
-                className="text-muted-foreground hover:text-red-600"
-                title="Remove from project"
-                onClick={() => removeMember(m.id)}
+          {members.map((m) => {
+            // Check if this person is inactive during any project month
+            const isInactiveInProject = project?.months.some((month, idx) => {
+              const monthYm = ymFromStartIndex(project.startMonthISO, idx);
+              return isPersonInactiveInMonth(m, monthYm);
+            });
+            
+            return (
+              <span
+                key={m.id}
+                className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm"
               >
-                ×
-              </button>
-            </span>
-          ))}
+                {m.name}
+                {isInactiveInProject && (
+                  <span title={`${m.name} is inactive during some project months. Check monthly plan below.`}>
+                    <AlertTriangle 
+                      className="h-3 w-3 text-red-500" 
+                    />
+                  </span>
+                )}
+                <button
+                  className="text-muted-foreground hover:text-red-600"
+                  title="Remove from project"
+                  onClick={() => removeMember(m.id)}
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
         </div>
       </div>
 
       {/* Summary tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
         <Tile label="Hours" value={totals.totalHours.toFixed(1)} />
         <Tile label="Labor cost" value={currency(totals.laborCost)} />
         <Tile label="Overhead cost" value={currency(totals.overheadCost)} />
         <Tile label="Expenses" value={currency(totals.expenses)} />
         <Tile label="All-in cost" value={currency(totals.allIn)} />
         <Tile label="Revenue" value={currency(totals.revenue)} />
-        <Tile label="Margin %" value={percent(totals.margin)} />
+        <Tile 
+          label="Margin" 
+          value={percent(totals.margin)} 
+          subValue={currency(totals.profit)}
+        />
+      </div>
+
+      {/* Charts Section */}
+      <div className="rounded-xl border space-y-4">
+        {/* Charts Header */}
+        <div 
+          className="flex items-center justify-between p-4 pb-2 cursor-pointer hover:bg-muted/50"
+          onClick={() => setChartsCollapsed(!chartsCollapsed)}
+        >
+          <h2 className="text-lg font-semibold">Charts</h2>
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+            {chartsCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </Button>
+        </div>
+        
+        {/* Collapsible Charts Content */}
+        <div className={`px-4 pb-4 space-y-6 transition-all duration-300 ease-in-out overflow-hidden ${chartsCollapsed ? "max-h-0 opacity-0 pb-0" : "max-h-[2000px] opacity-100"}`}>
+          {rolled.length > 0 ? (
+            <>
+              {/* Stacked Bar: monthly costs + revenue line */}
+              <div>
+                <div className="text-sm font-semibold mb-2">
+                  Monthly Costs (Labor, Overhead, Expenses) vs Revenue
+                </div>
+                <div style={{ width: "100%", height: 320 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={rolled}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="expenses" stackId="a" name="Expenses" fill="#9ca3af" />
+                      <Bar dataKey="labor" stackId="a" name="Labor" fill="#60a5fa" />
+                      <Bar dataKey="overhead" stackId="a" name="Overhead" fill="#f59e0b" />
+                      <Line
+                        type="monotone"
+                        dataKey="revenue"
+                        name="Revenue"
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Cumulative: Revenue vs All-in */}
+              <div>
+                <div className="text-sm font-semibold mb-2">
+                  Cumulative Revenue vs All-in
+                </div>
+                <div style={{ width: "100%", height: 320 }}>
+                  <ResponsiveContainer>
+                    <LineChart
+                      data={rolled.map((r, idx) => ({
+                        label: r.label,
+                        cumRevenue: cumulative[idx]?.cumRevenue ?? 0,
+                        cumAllIn: cumulative[idx]?.cumAllIn ?? 0,
+                      }))}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="cumRevenue"
+                        name="Cum. Revenue"
+                        stroke="#10b981"
+                        dot={false}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="cumAllIn"
+                        name="Cum. All-in"
+                        stroke="#ef4444"
+                        dot={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              No data to display. Add some months and allocations to see charts.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Monthly plan */}
@@ -461,7 +681,16 @@ export default function ProjectDetailsPage() {
                 return (
                   <div key={p.id} className="grid grid-cols-12 gap-2 items-center">
                     <div className="col-span-3" />
-                    <div className="col-span-3 truncate">{p.name}</div>
+                    <div className="col-span-3 flex items-center gap-2">
+                      <span className="truncate">{p.name}</span>
+                      {isPersonInactiveInMonth(p, monthYm) && (
+                        <span title={`${p.name} is inactive as of ${p.inactiveDate}. Consider removing them from this project month.`}>
+                          <AlertTriangle 
+                            className="h-4 w-4 text-red-500 flex-shrink-0" 
+                          />
+                        </span>
+                      )}
+                    </div>
                     <div className="col-span-2 text-right">{currency(eff)}/hr</div>
                     <div className="col-span-1">
                       <Input
@@ -542,7 +771,7 @@ export default function ProjectDetailsPage() {
             <div className="max-h-72 overflow-auto rounded-md border">
               {roster
                 .filter((p) =>
-                  p.name.toLowerCase().includes(personSearch.toLowerCase())
+                  p.isActive !== false && p.name.toLowerCase().includes(personSearch.toLowerCase())
                 )
                 .map((p) => {
                   const checked = tempSelected.has(p.id);
@@ -589,13 +818,16 @@ export default function ProjectDetailsPage() {
   );
 }
 
-function Tile({ label, value }: { label: string; value: string }) {
+function Tile({ label, value, subValue }: { label: string; value: string; subValue?: string }) {
   return (
-    <div className="rounded-2xl border p-4 bg-background">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-xl border bg-card shadow-sm p-4">
+      <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
-      <div className="text-2xl font-semibold">{value}</div>
+      <div className="text-2xl font-bold tracking-tight mt-2">{value}</div>
+      {subValue && (
+        <div className="text-sm text-muted-foreground mt-1">{subValue}</div>
+      )}
     </div>
   );
 }

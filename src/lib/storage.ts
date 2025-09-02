@@ -5,7 +5,7 @@ import { v4 as uuid } from "uuid";
 import {
   PersonType,
   FTCompMode,
-  ProjectType,
+  ProjectStatus,
   Department,
   RosterPerson,
   MonthRow,
@@ -92,7 +92,7 @@ export function createProject(partial?: Partial<Project>): Project {
     name: partial?.name ?? "New Project",
     description: partial?.description ?? "",
     status: partial?.status ?? "Active",
-    projectType: partial?.projectType ?? "Active",
+    projectStatus: partial?.projectStatus ?? "Active",
     overheadPerHour: partial?.overheadPerHour ?? 15,
     targetMarginPct: partial?.targetMarginPct ?? 0.35,
     startMonthISO: start,

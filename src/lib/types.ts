@@ -9,7 +9,7 @@ export type PersonType =
 
 export type FTCompMode = "monthly" | "annual";
 
-export type ProjectType =
+export type ProjectStatus =
   | "Test"
   | "BD"
   | "Active"
@@ -37,6 +37,8 @@ export interface RosterPerson {
   annualSalary?: number;
   hourlyRate?: number;
   baseMonthlyHours: number;
+  isActive: boolean;
+  inactiveDate?: string; // ISO date when person was marked inactive
 }
 
 export interface MonthRow {
@@ -52,7 +54,7 @@ export interface Project {
   name: string;
   description: string;
   status: string;
-  projectType: ProjectType;
+  projectStatus: ProjectStatus;
   overheadPerHour: number;
   targetMarginPct: number;
   startMonthISO: string;

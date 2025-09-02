@@ -2,11 +2,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { ChevronDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Project, RosterPerson, ProjectType } from "@/lib/types";
+import { Project, RosterPerson, ProjectStatus } from "@/lib/types";
 import { currency, computeProjectTotals, createProject, upsertProject } from "@/lib/storage";
 
 import { apiRepoAsync as repo } from "@/lib/repo";
@@ -18,29 +18,31 @@ export default function ProjectsPage() {
   
   // Filters
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [selectedProjectTypes, setSelectedProjectTypes] = useState<Set<ProjectType>>(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
-  // Collapsible filters UI state (collapsed by default for parity with others)
-  const [filtersCollapsed, setFiltersCollapsed] = useState(true);
+  const [selectedProjectStatuses, setSelectedProjectStatuses] = useState<Set<ProjectStatus>>(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
+  
+  // Multi-select dropdown state
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   
   // Filter toggle handlers
-  function toggleProjectType(type: ProjectType, checked: boolean) {
-    setSelectedProjectTypes(prev => {
+  function toggleProjectStatus(status: ProjectStatus, checked: boolean) {
+    setSelectedProjectStatuses(prev => {
       const next = new Set(prev);
       if (checked) {
-        next.add(type);
+        next.add(status);
       } else {
-        next.delete(type);
+        next.delete(status);
       }
       return next;
     });
   }
 
-  function selectAllProjectTypes() {
-    setSelectedProjectTypes(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
+  function selectAllProjectStatuses() {
+    setSelectedProjectStatuses(new Set(["Test", "BD", "Active", "Completed", "Cancelled"]));
   }
 
-  function clearProjectTypes() {
-    setSelectedProjectTypes(new Set());
+  function clearProjectStatuses() {
+    setSelectedProjectStatuses(new Set());
   }
 
   useEffect(() => {
@@ -62,6 +64,17 @@ export default function ProjectsPage() {
     return () => {
       mounted = false;
     };
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // No autosave here; we call incremental endpoints on actions
@@ -115,128 +128,160 @@ export default function ProjectsPage() {
         );
       }
       
-      // Filter by project type
-      filtered = filtered.filter(p => selectedProjectTypes.has(p.projectType));
+      // Filter by project status
+      filtered = filtered.filter(p => selectedProjectStatuses.has(p.projectStatus));
       
       // Sort by updatedAt (newest first)
       return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt);
     },
-    [projects, searchQuery, selectedProjectTypes]
+    [projects, searchQuery, selectedProjectStatuses]
   );
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Projects</h1>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
+          <p className="text-muted-foreground">
+            Manage project details, timelines, and financial planning
+          </p>
+        </div>
         <Button type="button" onClick={addProject}>New Project</Button>
       </div>
 
-      {/* Search and Filters (collapsible) */}
-      <div className="rounded-xl border space-y-4">
-        {/* Header */}
-        <div
-          className="flex items-center justify-between p-4 pb-2 cursor-pointer hover:bg-muted/50"
-          onClick={() => setFiltersCollapsed(!filtersCollapsed)}
-        >
-          <h2 className="text-lg font-semibold">Filters</h2>
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" aria-label={filtersCollapsed ? "Expand filters" : "Collapse filters"}>
-            {filtersCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-          </Button>
-        </div>
-
-        {/* Collapsible content */}
-        <div className={`px-4 pb-4 space-y-4 transition-all duration-300 ease-in-out overflow-hidden ${filtersCollapsed ? "max-h-0 opacity-0 pb-0" : "max-h-[2000px] opacity-100"}`}>
-          {/* Search */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Search Projects</label>
+      {/* Search and Filters - Inline */}
+      <div className="rounded-xl border bg-card shadow-sm p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             <Input
-              type="text"
-              placeholder="Search by name, description, or status..."
+              placeholder="Search projects by name, description, or status..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="max-w-md"
+              className="w-full sm:w-80"
             />
-          </div>
-
-          {/* Project Type Filter */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Project Types</label>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={selectAllProjectTypes}>Select all</Button>
-                <Button variant="outline" size="sm" onClick={clearProjectTypes}>Clear</Button>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">Status</span>
+                <div className="relative" ref={dropdownRef}>
+                  <button
+                    onClick={() => setDropdownOpen(!dropdownOpen)}
+                    className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-background text-sm min-w-[140px] justify-between hover:bg-muted transition-colors"
+                  >
+                    <span>
+                      {selectedProjectStatuses.size === 5 
+                        ? "All Statuses"
+                        : selectedProjectStatuses.size === 0
+                        ? "No Statuses"
+                        : `${selectedProjectStatuses.size} selected`
+                      }
+                    </span>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  
+                  {dropdownOpen && (
+                    <div className="absolute top-full left-0 mt-1 w-full bg-background border rounded-lg shadow-lg z-10 py-1">
+                      <div className="px-3 py-2 border-b flex gap-2">
+                        <button
+                          onClick={selectAllProjectStatuses}
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          Select all
+                        </button>
+                        <span className="text-xs text-muted-foreground">•</span>
+                        <button
+                          onClick={clearProjectStatuses}
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      {["Test", "BD", "Active", "Completed", "Cancelled"].map((status) => {
+                        const checked = selectedProjectStatuses.has(status as ProjectStatus);
+                        return (
+                          <label
+                            key={status}
+                            className="flex items-center gap-2 px-3 py-2 hover:bg-muted cursor-pointer text-sm"
+                          >
+                            <div className="relative flex items-center justify-center">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => toggleProjectStatus(status as ProjectStatus, e.target.checked)}
+                                className="sr-only"
+                              />
+                              <div className={`w-4 h-4 border rounded flex items-center justify-center ${
+                                checked ? 'bg-primary border-primary' : 'border-input'
+                              }`}>
+                                {checked && <Check className="h-3 w-3 text-primary-foreground" />}
+                              </div>
+                            </div>
+                            {status}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {["Test", "BD", "Active", "Completed", "Cancelled"].map((type) => {
-                const checked = selectedProjectTypes.has(type as ProjectType);
-                return (
-                  <label
-                    key={type}
-                    className={`inline-flex select-none items-center gap-2 rounded-full border px-3 py-1 text-sm cursor-pointer transition-colors ${
-                      checked ? "bg-secondary border-secondary-foreground" : "bg-background hover:bg-muted"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => toggleProjectType(type as ProjectType, e.target.checked)}
-                      className="sr-only"
-                    />
-                    {type}
-                  </label>
-                );
-              })}
-            </div>
+          </div>
+          <Button onClick={addProject} className="sm:ml-4">
+            New Project
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+        <div className="p-4 border-b bg-muted/30">
+          <div className="text-sm text-muted-foreground">
+            Showing {filteredAndSortedProjects.length} of {projects.length} projects
           </div>
         </div>
-      </div>
 
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-sm text-muted-foreground">
-          Showing {filteredAndSortedProjects.length} of {projects.length} projects
+        {/* Table header */}
+        <div className="grid grid-cols-12 gap-2 text-sm font-medium text-muted-foreground p-4 border-b bg-muted/30">
+          <div className="col-span-2">Name</div>
+          <div className="col-span-1">Status</div>
+          <div className="col-span-2">Start</div>
+          <div className="col-span-2 text-right">Revenue</div>
+          <div className="col-span-2 text-right">All-in</div>
+          <div className="col-span-1 text-right">Margin</div>
+          <div className="col-span-2 text-right">Actions</div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-12 gap-2 text-sm font-medium text-muted-foreground">
-        <div className="col-span-2">Name</div>
-        <div className="col-span-1">Type</div>
-        <div className="col-span-2">Start</div>
-        <div className="col-span-2 text-right">Revenue</div>
-        <div className="col-span-2 text-right">All-in</div>
-        <div className="col-span-1 text-right">Margin</div>
-        <div className="col-span-2 text-right">Actions</div>
-      </div>
-
-      {filteredAndSortedProjects.map((p) => {
+        {/* Table rows */}
+        <div className="divide-y">
+          {filteredAndSortedProjects.map((p) => {
         const totals = computeProjectTotals(p, roster);
         const marginPct = (totals.revenue > 0
           ? ((totals.revenue - totals.allIn) / totals.revenue) * 100
           : 0
         ).toFixed(1);
 
-        return (
-          <div key={p.id} className="grid grid-cols-12 gap-2 items-center">
-            <Link href={`/projects/${p.id}`} className="col-span-2 underline underline-offset-2">
-              {p.name}
-            </Link>
-            <div className="col-span-1">{p.projectType}</div>
-            <div className="col-span-2">{p.startMonthISO}</div>
-            <div className="col-span-2 text-right">{currency(totals.revenue)}</div>
-            <div className="col-span-2 text-right">{currency(totals.allIn)}</div>
-            <div className="col-span-1 text-right">{marginPct}%</div>
-            <div className="col-span-2 text-right space-x-2">
-              <Link className="text-sm underline" href={`/projects/${p.id}`}>Edit</Link>
-              <button className="text-sm underline" onClick={() => duplicateProject(p.id)}>
-                Duplicate
-              </button>
-              <button className="text-sm text-red-600 underline" onClick={() => removeProject(p.id)}>
-                Delete
-              </button>
-            </div>
-          </div>
-        );
-      })}
+            return (
+              <div key={p.id} className="grid grid-cols-12 gap-2 items-center p-4 hover:bg-muted/50 transition-colors">
+                <Link href={`/projects/${p.id}`} className="col-span-2 font-medium hover:text-primary underline-offset-4 hover:underline">
+                  {p.name}
+                </Link>
+                <div className="col-span-1">{p.projectStatus}</div>
+                <div className="col-span-2">{p.startMonthISO}</div>
+                <div className="col-span-2 text-right">{currency(totals.revenue)}</div>
+                <div className="col-span-2 text-right">{currency(totals.allIn)}</div>
+                <div className="col-span-1 text-right">{marginPct}%</div>
+                <div className="col-span-2 text-right space-x-2">
+                  <Link className="text-sm font-medium hover:text-primary underline-offset-4 hover:underline" href={`/projects/${p.id}`}>Edit</Link>
+                  <button className="text-sm font-medium hover:text-primary underline-offset-4 hover:underline" onClick={() => duplicateProject(p.id)}>
+                    Duplicate
+                  </button>
+                  <button className="text-sm font-medium text-red-600 hover:text-red-800 underline-offset-4 hover:underline" onClick={() => removeProject(p.id)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

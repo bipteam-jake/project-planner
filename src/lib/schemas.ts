@@ -22,7 +22,7 @@ export const DepartmentSchema = z.enum([
 
 export const FTCompModeSchema = z.enum(["monthly", "annual"]);
 
-export const ProjectTypeSchema = z.enum([
+export const ProjectStatusSchema = z.enum([
   "Test",
   "BD",
   "Active",
@@ -40,6 +40,8 @@ export const RosterPersonSchema = z.object({
   annualSalary: z.number().int().optional(),
   hourlyRate: z.number().optional(),
   baseMonthlyHours: z.number().int().nonnegative(),
+  isActive: z.boolean().default(true),
+  inactiveDate: z.string().optional(),
 });
 
 export const MonthRowSchema = z.object({
@@ -55,7 +57,7 @@ export const ProjectSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(""),
   status: z.string().default(""),
-  projectType: ProjectTypeSchema,
+  projectStatus: ProjectStatusSchema,
   overheadPerHour: z.number(),
   targetMarginPct: z.number(),
   startMonthISO: z.string().min(1),

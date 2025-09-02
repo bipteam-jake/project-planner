@@ -1,5 +1,5 @@
 // src/lib/repo.ts
-import { Project, RosterPerson, ProjectType, Department } from "@/lib/types";
+import { Project, RosterPerson, ProjectStatus, Department } from "@/lib/types";
 
 /**
  * Stable keys. Update these ONLY if you also migrate existing data.
@@ -80,20 +80,22 @@ export const localStorageRepo: Repo = {
     migrateIfNeeded();
     const projects = readJSON<Project[]>(PROJECTS_KEY) ?? [];
     
-    // Migrate projects that don't have projectType field
+    // Migrate projects that don't have projectStatus field (or have old projectType)
     let needsMigration = false;
     const migratedProjects = projects.map(project => {
-      // Check if projectType is missing or invalid
-      if (!project.projectType || typeof project.projectType !== 'string') {
+      // Check if projectStatus is missing or if we still have the old projectType field
+      if (!project.projectStatus || typeof project.projectStatus !== 'string') {
         needsMigration = true;
-        return { ...project, projectType: 'Active' as ProjectType };
+        // Migrate from old projectType field if it exists, otherwise default to 'Active'
+        const statusValue = (project as any).projectType || 'Active';
+        return { ...project, projectStatus: statusValue as ProjectStatus };
       }
       return project;
     });
     
     // If we migrated any projects, save them back
     if (needsMigration) {
-      console.log('Migrating projects to add projectType field');
+      console.log('Migrating projects to add projectStatus field');
       writeJSON(PROJECTS_KEY, migratedProjects);
     }
     
@@ -106,20 +108,29 @@ export const localStorageRepo: Repo = {
     migrateIfNeeded();
     const roster = readJSON<RosterPerson[]>(ROSTER_KEY) ?? [];
     
-    // Migrate roster that don't have department field
+    // Migrate roster that don't have department or isActive fields
     let needsMigration = false;
     const migratedRoster = roster.map(person => {
+      let updatedPerson = { ...person };
+      
       // Check if department is missing or invalid
       if (!person.department || typeof person.department !== 'string') {
         needsMigration = true;
-        return { ...person, department: 'Other' as Department };
+        updatedPerson.department = 'Other' as Department;
       }
-      return person;
+      
+      // Check if isActive is missing (but preserve explicit false values)
+      if (person.isActive === undefined || person.isActive === null) {
+        needsMigration = true;
+        updatedPerson.isActive = true; // Default to active for existing people
+      }
+      
+      return updatedPerson;
     });
     
     // If we migrated any people, save them back
     if (needsMigration) {
-      console.log('Migrating roster to add department field');
+      console.log('Migrating roster to add department and isActive fields');
       writeJSON(ROSTER_KEY, migratedRoster);
     }
     
@@ -200,12 +211,23 @@ export const apiRepoAsync: AsyncRepo = {
     return data;
   },
   async saveRoster(r: RosterPerson[]): Promise<void> {
+    // Normalize roster data to ensure new fields have default values
+    const normalizedRoster = r.map(person => ({
+      ...person,
+      isActive: person.isActive !== undefined ? person.isActive : true,
+      inactiveDate: person.inactiveDate || undefined,
+    }));
+    
     const res = await fetch("/api/roster", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(r),
+      body: JSON.stringify(normalizedRoster),
     });
-    if (!res.ok) throw new Error("Failed to save roster");
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.error("Failed to save roster:", res.status, errorData);
+      throw new Error(`Failed to save roster: ${res.status} ${errorData.error || ''}`);
+    }
   },
   async createProject(p: Project): Promise<void> {
     const res = await fetch(`/api/projects`, {
@@ -230,20 +252,42 @@ export const apiRepoAsync: AsyncRepo = {
     if (!res.ok) throw new Error("Failed to delete project");
   },
   async createPerson(p: RosterPerson): Promise<void> {
+    // Normalize person data to ensure new fields have default values
+    const normalizedPerson = {
+      ...p,
+      isActive: p.isActive !== undefined ? p.isActive : true,
+      inactiveDate: p.inactiveDate || undefined,
+    };
+    
     const res = await fetch(`/api/roster`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(p),
+      body: JSON.stringify(normalizedPerson),
     });
-    if (!res.ok) throw new Error("Failed to create person");
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.error("Failed to create person:", res.status, errorData);
+      throw new Error(`Failed to create person: ${res.status} ${errorData.error || ''}`);
+    }
   },
   async upsertPerson(p: RosterPerson): Promise<void> {
+    // Normalize person data to ensure new fields have default values
+    const normalizedPerson = {
+      ...p,
+      isActive: p.isActive !== undefined ? p.isActive : true,
+      inactiveDate: p.inactiveDate || undefined,
+    };
+    
     const res = await fetch(`/api/roster/${encodeURIComponent(p.id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(p),
+      body: JSON.stringify(normalizedPerson),
     });
-    if (!res.ok) throw new Error("Failed to upsert person");
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.error("Failed to upsert person:", res.status, errorData);
+      throw new Error(`Failed to upsert person: ${res.status} ${errorData.error || ''}`);
+    }
   },
   async deletePerson(id: string): Promise<void> {
     const res = await fetch(`/api/roster/${encodeURIComponent(id)}`, {

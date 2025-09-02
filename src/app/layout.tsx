@@ -1,8 +1,8 @@
 // src/app/layout.tsx
 import "./globals.css";
-import Link from "next/link";
 import type { ReactNode } from "react";
 import Image from "next/image";
+import Navigation from "@/components/Navigation";
 
 export const metadata = {
   title: "Project Planner",
@@ -14,34 +14,24 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body className="min-h-screen bg-background text-foreground antialiased">
         {/* Top navigation */}
-        <header className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-          <nav className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-6">
-            <Link href="/" className="font-semibold">
-              Dashboard
-            </Link>
-            <Link href="/resourcing" className="text-muted-foreground hover:text-foreground">
-              Resourcing
-            </Link>
-            <Link href="/projects" className="text-muted-foreground hover:text-foreground">
-              Projects
-            </Link>
-            <Link href="/personnel" className="text-muted-foreground hover:text-foreground">
-              Personnel
-            </Link>
-            <div className="ml-auto text-xs text-muted-foreground">
+        <header className="sticky top-0 z-40 border-b bg-card/80 backdrop-blur-xl supports-[backdrop-filter]:bg-card/80">
+          <nav className="mx-auto max-w-7xl px-4 sm:px-6 py-4 flex items-center gap-8">
+            <Navigation />
+            <div className="ml-auto">
               <Image
                 src="/BIP-logo.png"
                 alt="Company Logo"
-                width={140}     // adjust size as needed
+                width={140}
                 height={40}
                 priority
+                className="h-8 w-auto"
               />
             </div>
           </nav>
         </header>
 
         {/* Page content container */}
-        <main className="mx-auto max-w-7xl p-4 md:p-6">{children}</main>
+        <main className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8">{children}</main>
       </body>
     </html>
   );
